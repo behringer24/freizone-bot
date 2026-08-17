@@ -1,0 +1,24 @@
+.git
+.claude
+.gitignore
+
+# The workspace file points outside the build context; leaving it in would
+# make the image build fail confusingly rather than resolve the module.
+go.work
+go.work.sum
+
+# Local dev-only artifacts. The bot's data directory holds its private keys,
+# so copying one into an image layer would bake an identity into a published
+# image -- state is always a mounted volume, never part of the image.
+/data
+*.exe
+.env
+*.pem
+*.key
+*.crt
+
+/bin
+/dist
+
+README.md
+docs

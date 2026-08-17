@@ -1,0 +1,19 @@
+/bin/
+/dist/
+.env
+
+# The bot's own state: account directory (private keys), media, outbox,
+# control socket. Never committed, and named here rather than only in
+# .dockerignore because a stray `git add -A` is the likelier accident.
+/data/
+
+# Developer-local link to a freizone-server working tree. Deliberately not
+# committed: CI and the Docker build must resolve pkg/client from a tagged
+# module, and a checked-in workspace would silently build against whatever
+# branch happens to sit next door -- the trap freizone-app's replace
+# directive already has.
+go.work
+go.work.sum
+
+# Personal Claude Code workflow notes -- not part of the public project.
+CLAUDE.md
