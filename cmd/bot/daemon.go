@@ -566,7 +566,7 @@ func (d *daemon) handleStatus(context.Context, ipc.Request) (any, error) {
 		return nil, err
 	}
 	return ipc.StatusResponse{
-		Address:    d.id.AccountID + "*" + d.id.Server,
+		Address:    d.id.Address().String(),
 		Connected:  d.isConnected(),
 		Outbox:     waiting,
 		RouteGroup: d.cfg.RouteGroup,
@@ -689,16 +689,19 @@ func announce(cfg *config.Config, id client.Identity, fresh bool, logger *slog.L
 		logger.Warn("could not write the address file", "error", err)
 	}
 	if !fresh {
-		logger.Info("account ready", "address", id.AccountID+"*"+id.Server)
+		logger.Info("account ready", "address", id.Address().String())
 		return
 	}
 	// Deliberately also on stderr, unstructured: a first start is often watched
 	// by a person, and a JSON log line is the wrong shape for the one thing
 	// they have to copy somewhere else.
-	fmt.Fprintf(os.Stderr, "\n  This bot registered as:\n\n      %s*%s\n\n"+
+	// Hyphenated here and only here: this is the one rendering a person reads off
+	// a screen and types somewhere else, which is what the groups are for. The
+	// address file and the logs keep the canonical form.
+	fmt.Fprintf(os.Stderr, "\n  This bot registered as:\n\n      %s\n\n"+
 		"  Invite that address to the group it should post in.\n"+
-		"  It is also in %s.\n\n", id.AccountID, id.Server, cfg.AddressFile())
-	logger.Info("registered", "address", id.AccountID+"*"+id.Server)
+		"  It is also in %s.\n\n", id.Address().Display(), cfg.AddressFile())
+	logger.Info("registered", "address", id.Address().String())
 }
 
 // runStream keeps the live message stream up and handles what arrives on it.

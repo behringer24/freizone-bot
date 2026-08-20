@@ -208,6 +208,28 @@ partial success cannot page the recipients who already have it.
   which gives the composite `id*server` form one home in `pkg/address` and
   leaves this file a thin wrapper holding only the bot's own policy.
 
+- 2026-08-20 — **and then the parser left**, to freizone-server's `SRV-31`,
+  which is where the `id*server` format now lives (`pkg/address.Parse` /
+  `ParseFull` / `NormalizeServer` / `SameServer`). What stayed here is only what
+  is the *bot's* rule rather than the format's: a recipient must be complete and
+  never a prefix, an account goes in the peer route and a group in the group
+  route, no duplicates, a list is all-or-nothing. About forty lines, and each of
+  them is a decision this bot makes.
+
+  Two things improved by not being ours any more. The duplicate check moved to
+  `SameServer` and immediately caught a case it had been letting through:
+  `id*example.org` and `id*http://example.org` are one recipient, since the
+  scheme is how this bot happens to reach a server rather than part of who lives
+  there, and a check comparing rendered strings had been delivering to them
+  twice. And six places were building an address by hand with
+  `AccountID + "*" + Server` -- the status response, two log lines, the
+  first-run banner, `whoami`, the address file -- each keeping whatever spelling
+  of the server it had been configured with. So the address an operator was told
+  to invite did not match the address in the file sitting next to it. All six now
+  go through `client.Identity.Address()`, and each picked the rendering it
+  actually wanted: hyphenated in the banner a person reads off a screen,
+  canonical everywhere something is compared, stored or piped.
+
   **This is the fourth time in one session that documentation ran ahead of the
   code**, after SRV-23's status, the group route, and the join catch-up. The
   common thread is worth naming: each was a sentence written while designing

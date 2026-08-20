@@ -37,12 +37,12 @@ The first start registers an account and prints the address it got, then stops �
 ```
   This bot registered as:
 
-      qkh74xlzec2an4vth086f*https://chat.example.org
+      qkh74-xlzec-2an4v-th086-f*chat.example.org
 
   Invite that address to the group it should post in.
 ```
 
-That address is the one thing you have to act on: invite it to the group it should post in, or add it as a contact. It is also written to `<state>/address`, and `freizone-bot whoami` prints it later — including while the daemon is running, since it reads that file rather than opening the account.
+That address is the one thing you have to act on: invite it to the group it should post in, or add it as a contact. It is also written to `<state>/address`, and `freizone-bot whoami` prints it later — including while the daemon is running, since it reads that file rather than opening the account. Those two print it without the grouping hyphens, which are only there to help you read it off a screen; both forms mean the same address and either can be pasted anywhere.
 
 Then give it a route and start it for real:
 
@@ -202,8 +202,10 @@ actually has in front of them:
 | `qlfxcdsa42x4xe4gwjcnu*http://box.lan:18081` | The same, over a scheme you spelled out yourself |
 | `qlfxcdsa42x4xe4gwjcnu*local` | The bot's own server again — what the address format calls the local form, and equivalent to leaving the `*…` off |
 
-A bare host is given `https://`, because that is the only scheme a public
-Freizone server is reachable over. A scheme that is written out is left alone —
+The rules themselves are freizone-server's (`pkg/address`), not this bot's, so
+the app and the bot read an address the same way. A bare host is given
+`https://`, because that is the only scheme a public Freizone server is
+reachable over. A scheme that is written out is left alone —
 that is how a local test server on plain HTTP gets named deliberately rather
 than by accident.
 
@@ -218,9 +220,14 @@ is why every recipient is parsed when the configuration is read:
   match is how an alert reaches a stranger.
 - a group id in `ROUTE_PEERS`, or an account id in `ROUTE_GROUP`, is refused by
   name. The two differ by one leading character.
-- a recipient listed twice is refused. Collapsing it silently would hide the
-  likelier reading, which is that one of the two lines was meant to name
-  somebody else.
+- a recipient listed twice is refused, however differently the two lines are
+  spelled — including one naming a server as `example.org` and the other as
+  `http://example.org`, since the scheme is how *this bot* reaches that server
+  rather than part of who lives there. Collapsing a duplicate silently would
+  hide the likelier reading, which is that one of the two lines was meant to
+  name somebody else.
+- the same account **on two different servers is two recipients**, and both are
+  kept. In a federated namespace an id alone does not identify anybody.
 - one bad entry fails the whole list. A bot that came up with three of four
   recipients would page three people and look like it was working.
 

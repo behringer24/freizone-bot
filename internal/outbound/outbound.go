@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/behringer24/freizone-bot/internal/config"
+	"github.com/behringer24/freizone-server/pkg/address"
 	"github.com/behringer24/freizone-server/pkg/client"
 )
 
@@ -59,18 +60,19 @@ type Destination struct {
 	Kind Kind   `json:"kind"`
 	ID   string `json:"id"`
 
-	// Server is where a peer lives, empty for this bot own server. Carried on
+	// Server is where a peer lives, empty for this bot's own server. Carried on
 	// the destination because an outbox entry outlives the configuration that
 	// produced it: a message queued for a federated peer has to still know where
 	// that peer is after a restart.
 	Server string `json:"server,omitempty"`
 }
 
+// String identifies a destination in a log line, and is the key an outbox entry
+// and the deduplicator are held under -- so it has to be the canonical form of
+// an address rather than a rendering of one, or the same recipient spelled two
+// ways would be two destinations.
 func (d Destination) String() string {
-	if d.Server != "" {
-		return string(d.Kind) + ":" + d.ID + "*" + d.Server
-	}
-	return string(d.Kind) + ":" + d.ID
+	return string(d.Kind) + ":" + address.Address{ID: d.ID, Server: d.Server}.String()
 }
 
 // Route names a configured set of destinations.
@@ -221,7 +223,7 @@ func Resolve(cfg *config.Config, route string, labels map[string]string) ([]Dest
 			return nil, err
 		}
 		for _, p := range peers {
-			out = append(out, Destination{Kind: KindPeer, ID: p.AccountID, Server: p.Server})
+			out = append(out, Destination{Kind: KindPeer, ID: p.ID, Server: p.Server})
 		}
 	}
 	if len(out) == 0 {

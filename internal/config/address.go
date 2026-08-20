@@ -7,143 +7,98 @@ import (
 	"github.com/behringer24/freizone-server/pkg/address"
 )
 
-// Reading a recipient out of configuration.
+// Reading recipients out of configuration.
 //
-// # Why this is here at all
+// The address format itself -- `id*server`, the local form, scheme defaulting,
+// what counts as one server -- lives in `pkg/address` (SRV-31). This file holds
+// only what is the *bot's* rule rather than the format's, and the difference is
+// worth keeping visible: this package once had its own parser, written from the
+// format's description, and it disagreed with the app's in four places inside a
+// day. One of those disagreements silently routed `*local` nowhere.
 //
-// A Freizone address is written `id*server` -- that is the form a person copies
-// out of the app and pastes into a configuration file. Nothing in the Go core
-// parses it: `pkg/address` normalises the *id* half (stripping the hyphens a
-// display form inserts, checking the checksum) and knows nothing about the
-// server. Only freizone-app's Dart side ever split on the star.
+// What belongs here: recipients must be complete (never a prefix), an account
+// where an account is meant, a group where a group is meant, no duplicates, and
+// a list that is all or nothing.
+
+// ParsePeer reads one configured recipient.
 //
-// So a bot that took a bare id and asked its own server for it could reach
-// nobody else's -- which quietly made every recipient local, in a product whose
-// whole point is that servers federate.
-
-// Peer is one configured recipient: which account, and where it lives.
-type Peer struct {
-	AccountID string
-
-	// Server is empty for an account on this bot's own server. That emptiness is
-	// load-bearing rather than a convenience -- it is what selects local versus
-	// federated delivery and authentication throughout pkg/client's send path.
-	Server string
-}
-
-func (p Peer) String() string {
-	if p.Server == "" {
-		return p.AccountID
-	}
-	return p.AccountID + "*" + p.Server
-}
-
-// ParsePeer reads a configured recipient.
-//
-// Accepts:
-//
-//	q9zk4…                        an account on this bot's own server
-//	q9zk4-…-…                     the same, in the hyphenated display form
-//	q9zk4…*chat.example.org       an account on another server
-//	q9zk4…*https://chat.example.org
-//
-// A bare host is given `https://`, because that is the only scheme a Freizone
-// server is reachable over and requiring it in configuration would be a papercut
-// with no upside. A scheme that is spelled out is left alone, so a local test
-// server can be named `http://…` deliberately -- which is the one case where the
-// difference matters and guessing would be wrong.
-func ParsePeer(raw string) (Peer, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return Peer{}, fmt.Errorf("empty recipient")
-	}
-
-	id, server, hasServer := strings.Cut(raw, "*")
-
-	normalised, err := address.Normalize(id)
+// Strict on purpose. `pkg/address.Parse` accepts a prefix because interactive
+// completion needs it; configuration is not typed under time pressure, and a
+// truncated id in an environment file resolving to whoever happens to match is
+// how a message reaches a stranger.
+func ParsePeer(raw string) (address.Address, error) {
+	peer, err := address.ParseFull(raw)
 	if err != nil {
-		// Deliberately strict here, unlike ResolvePeer -- which tolerates a
-		// prefix because a person typing into a search box wants completion.
-		// Configuration is not typed under time pressure, and a truncated id in
-		// an environment file should fail at startup rather than resolve to
-		// whoever happens to match.
-		return Peer{}, fmt.Errorf("%q is not a Freizone account id: %w", id, err)
+		return address.Address{}, fmt.Errorf("%q is not a Freizone address: %w", strings.TrimSpace(raw), err)
 	}
 
-	// An account id and a group id differ by a single version marker, so a group
-	// listed as a peer would be addressed as a person and fail somewhere far
-	// away from the line that got it wrong.
-	version, err := address.VersionOf(normalised)
+	// An account id and a group id differ by a single version marker, so a
+	// group listed as a peer would be addressed as a person and fail somewhere
+	// far away from the line that got it wrong.
+	version, err := address.VersionOf(peer.ID)
 	if err != nil {
-		return Peer{}, fmt.Errorf("%q has no readable version marker: %w", id, err)
+		return address.Address{}, fmt.Errorf("%q has no readable version marker: %w", raw, err)
 	}
 	if version == address.VersionGroup {
-		return Peer{}, fmt.Errorf("%q is a group id, not an account -- a group belongs in the group route", id)
+		return address.Address{}, fmt.Errorf("%q is a group id, not an account -- a group belongs in the group route", peer.ID)
 	}
-
-	if !hasServer {
-		return Peer{AccountID: normalised}, nil
-	}
-	// `*local`, and a bare trailing `*`, both mean "whatever server this is
-	// resolved against" -- the format says so, and treating them as equivalent
-	// to no star at all is why a parser can always split on the first star
-	// rather than special-casing the absence of one. Read literally instead,
-	// `*local` becomes the host `https://local` and quietly routes nowhere.
-	server = strings.TrimSpace(server)
-	if server == "" || strings.EqualFold(server, "local") {
-		return Peer{AccountID: normalised}, nil
-	}
-	if !strings.Contains(server, "://") {
-		server = "https://" + server
-	}
-	return Peer{AccountID: normalised, Server: strings.TrimSuffix(server, "/")}, nil
+	return peer, nil
 }
 
-// ParsePeers reads a whole configured list, reporting the first bad entry.
+// ParsePeers reads a whole configured list.
 //
-// All-or-nothing on purpose: a bot that started with three of four recipients
-// would page three people and look like it was working.
-func ParsePeers(raw []string) ([]Peer, error) {
-	out := make([]Peer, 0, len(raw))
-	seen := make(map[string]struct{}, len(raw))
+// All-or-nothing on purpose: a bot that came up with three of four recipients
+// would deliver to three people and look like it was working.
+func ParsePeers(raw []string) ([]address.Address, error) {
+	out := make([]address.Address, 0, len(raw))
 	for _, entry := range raw {
-		p, err := ParsePeer(entry)
+		peer, err := ParsePeer(entry)
 		if err != nil {
 			return nil, err
 		}
 		// Refused rather than quietly collapsed: a repeated recipient would be
-		// paged twice, and the likelier reading of a duplicate is that one of
+		// sent to twice, and the likelier reading of a duplicate is that one of
 		// the two entries was meant to name somebody else.
-		if _, dup := seen[p.String()]; dup {
-			return nil, fmt.Errorf("%s is listed twice", p)
+		//
+		// Compared with SameServer rather than by rendered string, because the
+		// scheme is how this bot happens to reach a server and not part of its
+		// identity -- so `id*example.org` and `id*http://example.org` are one
+		// recipient, and a string comparison would send to them twice.
+		for _, seen := range out {
+			if seen.ID == peer.ID && address.SameServer(seen.Server, peer.Server) {
+				return nil, fmt.Errorf("%s is listed twice", peer)
+			}
 		}
-		seen[p.String()] = struct{}{}
-		out = append(out, p)
+		out = append(out, peer)
 	}
 	return out, nil
 }
 
 // ParseGroupID checks a configured group id.
 //
-// Validated for the same reason a recipient is, and with one addition: a group
-// id and an account id differ only by a version marker, so an account id put in
-// the group route would otherwise fail at send time with something obscure
-// about a group nobody can find. Said here instead, at startup, in words.
+// A group is not reached through a server the way an account is -- its id is
+// derived from its own root key -- so this takes an id and not an address, and
+// says so if it is given one.
 func ParseGroupID(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
-	normalised, err := address.Normalize(raw)
+	if strings.Contains(raw, "*") {
+		return "", fmt.Errorf("%q looks like an address: a group is not reached through a server, so its id stands alone", raw)
+	}
+	id, err := address.Normalize(raw)
 	if err != nil {
 		return "", fmt.Errorf("%q is not a Freizone id: %w", raw, err)
 	}
-	version, err := address.VersionOf(normalised)
+	version, err := address.VersionOf(id)
 	if err != nil {
 		return "", fmt.Errorf("%q has no readable version marker: %w", raw, err)
 	}
+	// The likelier of the two mistakes: the ids look alike and only the first
+	// character differs.
 	if version != address.VersionGroup {
 		return "", fmt.Errorf("%q is an account id, not a group id -- a group route needs a group", raw)
 	}
-	return normalised, nil
+	return id, nil
 }
