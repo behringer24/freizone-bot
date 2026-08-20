@@ -10,6 +10,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -25,6 +26,10 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		err = runDaemon(os.Args[2:])
+	case "send":
+		err = runSend(os.Args[2:])
+	case "status":
+		err = runStatus(os.Args[2:])
 	case "whoami":
 		err = runWhoami(os.Args[2:])
 	case "-h", "--help", "help":
@@ -38,6 +43,12 @@ func main() {
 
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "freizone-bot: "+readable(err))
+		// A specific exit code where there is one to give: this ends up inside
+		// shell scripts, and a script can only branch on a number.
+		var coded *exitError
+		if errors.As(err, &coded) {
+			os.Exit(coded.code)
+		}
 		os.Exit(1)
 	}
 }
@@ -58,10 +69,20 @@ func usage() {
 	fmt.Fprint(os.Stderr, `freizone-bot -- an automation daemon for Freizone
 
 Usage:
-  freizone-bot run          run the daemon
-  freizone-bot whoami       print this bot's own Freizone address
+  freizone-bot run                    run the daemon
+  freizone-bot send [flags] [TEXT]    send a message through the running daemon
+  freizone-bot status                 ask the running daemon how it is doing
+  freizone-bot whoami                 print this bot's own Freizone address
+
+send takes its text as an argument, or on standard input when no argument is
+given -- never both, so that a stdin nobody closes cannot make it hang. Run a
+subcommand with -h for its flags.
 
 Configuration is by environment variable; see the configuration reference in
 README.md. FREIZONE_BOT_SERVER is the only one without a default.
+
+send exits 0 when the message is durably queued, 1 on a usage or configuration
+problem, 2 when the daemon refused it, 3 on a daemon error, 4 when no daemon is
+running, and 5 on a timeout.
 `)
 }

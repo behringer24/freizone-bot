@@ -28,7 +28,7 @@ freizone-app.
 ## Items
 
 ### BOT-01 — The alerting daemon
-Status: `in progress` · Depends on: SRV-30 · Also affects: freizone-server
+Status: `done` · Depends on: SRV-30 · Also affects: freizone-server
 Design: [design/01-automation-daemon.md](design/01-automation-daemon.md)
 
 The first capability, and deliberately larger than a minimal phase: a bot that
@@ -68,6 +68,46 @@ message arrives in the operator's Freizone group with the bot as a member.
 
   Still open in this item: the control socket, the routes and
   `freizone-bot send` — everything on the *sending* side.
+- 2026-08-20 — **done.** The sending half: the control socket (`internal/ipc`,
+  `internal/control`), named routes (`internal/outbound`), the durable queue
+  (`internal/outbox`), the crude rate cap, and `freizone-bot send` / `status`.
+  Driven end to end against a real server rather than only in tests: two
+  messages delivered and read back through `devclient` in the shape they were
+  meant to have, all five documented exit codes produced on demand, a failed
+  delivery retried on its backoff and still in the queue after a daemon
+  restart, and the rate cap suppressing seven of twenty-five and reporting
+  exactly that count on the next message through — which the recipient saw.
+
+  Newline-delimited JSON over the socket, not HTTP. Tempting, since it would
+  reuse freizone-gateway's whole api idiom — and rejected because it turns "this
+  bot opens no network listener" from a property of the *code* into a property
+  of the *configuration*. Once the handlers are `http.Handler`s, a port is two
+  lines away, and BOT-08's decision gets taken by accident instead of on
+  purpose.
+
+  One entry in the queue per **message × destination**, not per message: one
+  entry covering three recipients would, on a retry after two succeeded, page
+  those two again. Same rule `pkg/client`'s group fan-out already arrived at,
+  one layer up.
+
+  Shutdown order is deliberately not the reverse of startup — the control
+  socket closes *first*, so nothing can be told "safely queued" about a message
+  that will only go out after the restart.
+
+  **The real run found a bug the tests could not.** `send` read standard input
+  whenever it was not a terminal, which reads as harmless: a pipe has an end.
+  Under a service manager, a CI runner or cron it does not — stdin is routinely
+  an open pipe nobody writes to and nobody closes, and `send "disk full"` hung
+  forever waiting for an EOF that was not coming. An alerting tool blocking at
+  the moment it is needed is the worst failure it has available. The rule is
+  positional now: an argument means the text is there and stdin is never
+  touched; nothing there means it comes from stdin, which is the `cmd | send`
+  case where the producer does close it. The convenience of accepting both at
+  once was not worth a hang.
+
+  Also fixed on the way: the suppression note read "1 further message **were**
+  suppressed", and the test that should have caught it was written to accept
+  either form -- which is to say it pinned nothing. Both corrected.
 
 ### BOT-02 — One-to-one routes
 Status: `planned`
