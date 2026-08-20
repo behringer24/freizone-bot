@@ -43,6 +43,22 @@ func TestTheHyphenatedDisplayFormIsAccepted(t *testing.T) {
 	}
 }
 
+// Both spellings of "this server" from the address format. Read literally,
+// `*local` becomes the host `https://local`, which resolves nowhere and reports
+// itself as an unreachable server rather than as a misread address.
+func TestLocalAndABareStarMeanOurOwnServer(t *testing.T) {
+	for _, raw := range []string{acctA + "*local", acctA + "*LOCAL", acctA + "*", acctA + "*   "} {
+		got, err := ParsePeer(raw)
+		if err != nil {
+			t.Errorf("ParsePeer(%q): %v", raw, err)
+			continue
+		}
+		if got.AccountID != acctA || got.Server != "" {
+			t.Errorf("ParsePeer(%q) = %+v, want the local form", raw, got)
+		}
+	}
+}
+
 func TestAStarNamesAnotherServer(t *testing.T) {
 	for _, tc := range []struct {
 		raw    string
@@ -87,8 +103,6 @@ func TestWhatIsRefused(t *testing.T) {
 	}{
 		{"", "empty"},
 		{"   ", "empty"},
-		{acctA + "*", "no server"},
-		{acctA + "*   ", "no server"},
 		{"not-an-address", "not a Freizone account id"},
 		// A group in the peer route: rejected here, with the fix named, rather
 		// than failing later as a person who cannot be found.
