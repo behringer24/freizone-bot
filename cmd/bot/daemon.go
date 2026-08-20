@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"github.com/behringer24/freizone-bot/internal/account"
+	"github.com/behringer24/freizone-bot/internal/action"
+	"github.com/behringer24/freizone-bot/internal/authz"
+	"github.com/behringer24/freizone-bot/internal/command"
 	"github.com/behringer24/freizone-bot/internal/config"
 	"github.com/behringer24/freizone-bot/internal/control"
 	"github.com/behringer24/freizone-bot/internal/ipc"
@@ -128,6 +131,29 @@ func runDaemon(args []string) error {
 		id:      id,
 	}
 
+	// The command surface, if one is configured. Built after d exists because
+	// the status action reads from it -- and left entirely absent otherwise, so
+	// there is no half-wired path for a message to wander into.
+	d.policy = authz.New(cfg.Commanders, cfg.AllowGroupCommands)
+	if d.policy.Enabled() {
+		jokes, err := action.LoadJokes(cfg.JokesFile)
+		if err != nil {
+			return err
+		}
+		d.actions = action.NewRegistry()
+		action.RegisterBuiltins(d.actions, d.statusLine, jokes)
+		// The parser is built from the same specs a model-driven interpreter
+		// would render as tool definitions -- which is the check that those
+		// specs are a sufficient description of an action.
+		d.interpreter = command.NewBuiltin(d.actions.Specs())
+		logger.Info("command surface enabled",
+			"commanders", d.policy.Commanders(),
+			"group_commands", cfg.AllowGroupCommands,
+			"actions", len(d.actions.Specs()))
+	} else {
+		logger.Info("command surface disabled: no FREIZONE_BOT_COMMANDERS configured")
+	}
+
 	ctrl := control.New(ln, version, logger, map[string]control.Handler{
 		ipc.OpSend:   d.handleSend,
 		ipc.OpStatus: d.handleStatus,
@@ -188,6 +214,12 @@ type daemon struct {
 	deduper *outbound.Deduper
 	started time.Time
 	id      client.Identity
+
+	// The inbound half. Nil interpreter means no command surface is configured,
+	// which is the default -- see internal/authz on why that fails closed.
+	policy      *authz.Policy
+	interpreter command.Interpreter
+	actions     *action.Registry
 
 	// connected is what the stream last reported. Only ever read for a status
 	// answer, so a plain mutex is the right amount of machinery.
@@ -278,6 +310,98 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 	return ipc.SendResponse{Queued: len(ids), Delivered: delivered}, nil
 }
 
+// dispatch is the inbound half: a message somebody sent the bot, possibly
+// meaning something.
+//
+// The order of the checks here is the most important thing in this file, and it
+// is not an optimisation. **Authorization comes before interpretation.** A
+// sender who is not allow-listed has their text dropped before the interpreter
+// ever sees it.
+//
+// Today the interpreter is a parser and the ordering looks academic. It stops
+// being academic the moment a model sits there (BOT-10): an interpreter that
+// sees everything is one that anyone knowing this bot's address can write
+// prompts for. Doing the check first is what makes that impossible rather than
+// merely unlikely.
+func (d *daemon) dispatch(ctx context.Context, res client.ReceiveResult) {
+	if d.interpreter == nil {
+		return // no command surface configured
+	}
+	// A duplicate has already been acted on, and a blocked sender is somebody
+	// the operator cut off -- neither should reach anything below.
+	if res.Duplicate || res.Blocked {
+		return
+	}
+	if res.Content.Kind != client.ContentText && res.Content.Kind != client.ContentGroupText {
+		return
+	}
+
+	chatID, isGroup := res.PeerAccountID, false
+	if res.Group != nil {
+		chatID, isGroup = res.Group.GroupID, true
+	}
+
+	if !d.policy.MayCommand(res.PeerAccountID, isGroup) {
+		// Silence, not a refusal. A refusal is an oracle -- it confirms to
+		// whoever asked that something is here and listening -- and it is an
+		// amplification vector besides. Logged at debug so an operator
+		// wondering why their own command did nothing can find out.
+		d.logger.Debug("ignoring a message from somebody who may not command this bot",
+			"sender", res.PeerAccountID, "group", isGroup)
+		return
+	}
+
+	intent, err := d.interpreter.Interpret(ctx, command.Input{
+		Text:            res.Content.Text,
+		SenderAccountID: res.PeerAccountID,
+		ChatID:          chatID,
+		IsGroup:         isGroup,
+		Now:             time.Now(),
+	})
+	if err != nil {
+		d.logger.Warn("could not interpret a command", "sender", res.PeerAccountID, "error", err)
+		return
+	}
+
+	switch {
+	case intent.Action != "":
+		out, err := d.actions.Execute(ctx, intent.Action, intent.Params, res.PeerAccountID, chatID)
+		if err != nil {
+			// Named actions that do not exist are the interpreter's mistake
+			// rather than the sender's, and the sender still gets something
+			// they can act on. The detail goes to the log.
+			d.logger.Warn("action failed", "action", intent.Action, "sender", res.PeerAccountID, "error", err)
+			d.reply(ctx, chatID, "That did not work: "+err.Error())
+			return
+		}
+		d.logger.Info("action carried out", "action", intent.Action, "sender", res.PeerAccountID)
+		d.reply(ctx, chatID, out.Reply)
+	case intent.Reply != "":
+		d.reply(ctx, chatID, intent.Reply)
+	}
+}
+
+// reply answers in the chat the request came from, and nowhere else.
+//
+// Deliberately not through a route: a route is where the bot *announces* things,
+// and an answer belongs to the conversation that asked. Routing an answer would
+// mean one person's question reaching a channel they never addressed.
+func (d *daemon) reply(ctx context.Context, chatID, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	dest := outbound.Destination{Kind: outbound.KindPeer, ID: chatID}
+	if client.IsGroupID(chatID) {
+		dest.Kind = outbound.KindGroup
+	}
+	if err := d.sender.Deliver(ctx, dest, text); err != nil {
+		// Not queued through the outbox: an answer that arrives an hour after
+		// the question is worse than none, and the person asking is right there
+		// to ask again.
+		d.logger.Warn("could not answer", "chat", chatID, "error", err)
+	}
+}
+
 // labelPairs renders labels for a log line: sorted, so the same message logs
 // the same way twice rather than reshuffling with Go's map order.
 func labelPairs(labels map[string]string) string {
@@ -289,6 +413,22 @@ func labelPairs(labels map[string]string) string {
 		parts = append(parts, k+"="+labels[k])
 	}
 	return strings.Join(parts, " ")
+}
+
+// statusLine is what the `status` action answers with -- the same facts the
+// control socket reports, in a shape somebody reads in a chat rather than
+// parses.
+func (d *daemon) statusLine() string {
+	waiting, err := d.box.Len()
+	if err != nil {
+		waiting = -1
+	}
+	connected := "no"
+	if d.isConnected() {
+		connected = "yes"
+	}
+	return fmt.Sprintf("connected: %s\nqueued: %d\nup for: %s\nversion: %s",
+		connected, waiting, time.Since(d.started).Round(time.Second), version)
 }
 
 func (d *daemon) handleStatus(context.Context, ipc.Request) (any, error) {
@@ -480,6 +620,8 @@ func runStream(ctx context.Context, c *client.Client, logger *slog.Logger, upkee
 					"sender", res.PeerAccountID,
 					"duplicate", res.Duplicate,
 					"group", res.Group != nil)
+
+				d.dispatch(ctx, res)
 
 			case client.StreamDisconnected:
 				// Routine, not a failure: the core reconnects on its own, and a
