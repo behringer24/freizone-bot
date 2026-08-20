@@ -190,9 +190,12 @@ func (c *Config) MediaDir() string { return filepath.Join(c.StateDir, "media") }
 // OutboxDir holds messages accepted but not yet delivered.
 func (c *Config) OutboxDir() string { return filepath.Join(c.StateDir, "outbox") }
 
-// LockFile is the account-ownership lock. Its contents are informational; the
-// kernel-held lock on it is what actually excludes a second process.
-func (c *Config) LockFile() string { return filepath.Join(c.StateDir, "owner.lock") }
+// AddressFile holds the bot's own Freizone address, written once it has one.
+//
+// The single fact an operator must act on -- they cannot invite the bot
+// anywhere without it -- and a log line at first start is often watched by
+// nobody. See account.WriteAddress.
+func (c *Config) AddressFile() string { return filepath.Join(c.StateDir, "address") }
 
 // RoutesConfigured reports whether anything is configured to send to. Follows
 // the gateway's FCMConfigured shape: an unconfigured subsystem is reported

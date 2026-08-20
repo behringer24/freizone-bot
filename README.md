@@ -4,7 +4,7 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Why this exists:** operations alerting is the first thing it does. A monitoring system that pages you through Slack or Telegram hands every alert — hostnames, internal addresses, stack traces, sometimes a credential in a log line — to a third party. Freizone is end-to-end encrypted and self-hosted, so the same alert reaches the same phone without anyone in between being able to read it. Alerting is the first capability rather than the shape of the whole thing: the same daemon is where a server-assistant, a command bot and later integrations live.
 
-**Status:** early. The repository skeleton and configuration are in place; `BOT-01` (the alerting daemon) is in progress — see [`docs/ROADMAP.md`](docs/ROADMAP.md). It is not usable yet.
+**Status:** early. The daemon registers its own account, holds a live connection, drains whatever is queued for it and keeps itself healthy. What it cannot do yet is **send** — the control socket, the routes and `freizone-bot send` are the rest of `BOT-01`, see [`docs/ROADMAP.md`](docs/ROADMAP.md). So it is worth starting to get an address, and not yet worth relying on.
 
 ## What the bot never does
 
@@ -22,9 +22,40 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Incoming messages are untrusted input from anyone** who knows the bot's address, and every group member does. Commands are therefore off unless an allow-list is configured, a sender who is not on it gets no reply at all, and the authorization check runs *before* any interpretation of the text — which is what will keep a future model-driven interpreter from being promptable by strangers.
 
-## Local development
+## Getting it running
 
-You need a Freizone server to register against. Any instance will do, including one you run locally for the purpose; the bot only needs its address and an invite code if that server's registration policy requires one.
+You need a Freizone server to register against — any instance, including one you run locally for the purpose. The bot needs its address, and an invite code if that server's registration policy requires one.
+
+```sh
+FREIZONE_BOT_SERVER=https://chat.example.org \
+FREIZONE_BOT_STATE_DIR=./data \
+freizone-bot run
+```
+
+The first start registers an account and prints the address it got, then stops — because there is nowhere to send yet:
+
+```
+  This bot registered as:
+
+      qkh74xlzec2an4vth086f*https://chat.example.org
+
+  Invite that address to the group it should post in.
+```
+
+That address is the one thing you have to act on: invite it to the group it should post in, or add it as a contact. It is also written to `<state>/address`, and `freizone-bot whoami` prints it later — including while the daemon is running, since it reads that file rather than opening the account.
+
+Then give it a route and start it for real:
+
+```sh
+FREIZONE_BOT_SERVER=https://chat.example.org \
+FREIZONE_BOT_STATE_DIR=./data \
+FREIZONE_BOT_ROUTE_GROUP=qgroupid… \
+freizone-bot run
+```
+
+A daemon with no route refuses to start rather than warning: one that accepts messages with nowhere to put them is worse than one that is plainly not configured.
+
+## Local development
 
 ```sh
 go build ./...

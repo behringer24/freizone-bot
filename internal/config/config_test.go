@@ -179,7 +179,7 @@ func TestDerivedPathsHangOffTheStateDirectory(t *testing.T) {
 		"account": cfg.AccountDir(),
 		"media":   cfg.MediaDir(),
 		"outbox":  cfg.OutboxDir(),
-		"lock":    cfg.LockFile(),
+		"address": cfg.AddressFile(),
 	} {
 		if !strings.HasPrefix(got, filepath.Clean("/srv/bot")) {
 			t.Errorf("%s path escaped the state directory: %q", name, got)
