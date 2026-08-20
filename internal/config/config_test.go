@@ -80,18 +80,18 @@ func TestAnExplicitControlSocketWins(t *testing.T) {
 func TestBothRoutesCanBeConfiguredAtOnce(t *testing.T) {
 	cfg, err := Load(envMap(map[string]string{
 		envServer:     "chat.example.org",
-		envRouteGroup: "qgroup1",
-		envRoutePeers: "qpeer1, qpeer2 ,",
+		envRouteGroup: "plfxcdsa42x4xe4zr2mju",
+		envRoutePeers: "qlfxcdsa42x4xe4gwjcnu, qu0qmxckqmum0dv77pndv ,",
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.RouteGroup != "qgroup1" {
+	if cfg.RouteGroup != "plfxcdsa42x4xe4zr2mju" {
 		t.Errorf("group route: got %q", cfg.RouteGroup)
 	}
 	// A trailing comma and stray spaces are what an EnvironmentFile edited by
 	// hand actually looks like; they are not a configuration error.
-	if len(cfg.RoutePeers) != 2 || cfg.RoutePeers[0] != "qpeer1" || cfg.RoutePeers[1] != "qpeer2" {
+	if len(cfg.RoutePeers) != 2 || cfg.RoutePeers[0] != "qlfxcdsa42x4xe4gwjcnu" || cfg.RoutePeers[1] != "qu0qmxckqmum0dv77pndv" {
 		t.Errorf("peer route: got %#v", cfg.RoutePeers)
 	}
 	if !cfg.RoutesConfigured() {

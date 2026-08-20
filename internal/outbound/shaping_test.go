@@ -15,9 +15,9 @@ func cfgRouted(t *testing.T, severityRoutes string) *config.Config {
 		case "FREIZONE_BOT_SERVER":
 			return "https://chat.example.org"
 		case "FREIZONE_BOT_ROUTE_GROUP":
-			return "qgroup"
+			return "plfxcdsa42x4xe4zr2mju"
 		case "FREIZONE_BOT_ROUTE_PEERS":
-			return "qpeer1,qpeer2"
+			return "qlfxcdsa42x4xe4gwjcnu,qu0qmxckqmum0dv77pndv"
 		case "FREIZONE_BOT_ROUTE_RULES":
 			return severityRoutes
 		}
@@ -96,7 +96,7 @@ func TestAMappingToAnUnconfiguredRouteSaysWhichToFix(t *testing.T) {
 		case "FREIZONE_BOT_SERVER":
 			return "https://chat.example.org"
 		case "FREIZONE_BOT_ROUTE_GROUP":
-			return "qgroup" // no peers configured
+			return "plfxcdsa42x4xe4zr2mju" // no peers configured
 		case "FREIZONE_BOT_ROUTE_RULES":
 			return "severity:critical=peers"
 		}

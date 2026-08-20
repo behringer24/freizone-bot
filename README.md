@@ -178,7 +178,7 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_CONTROL_GROUP` | – | A group that owns the socket's parent directory, so members of it may talk to the daemon. Unset leaves the directory to the daemon's own user alone. |
 | `FREIZONE_BOT_ROUTE_GROUP` | – | A group id messages are sent to. The bot **accepts an invitation to this group automatically** — naming it is asking for it. Create the group, invite the bot, and it joins on its own. |
 | `FREIZONE_BOT_ACCEPT_GROUP_INVITES` | `false` | Whether the bot accepts invitations to *other* groups too. Off by default: an invitation you did not ask for is a stranger deciding what your bot is a member of, and from then on it holds that group’s facts and receives its traffic. |
-| `FREIZONE_BOT_ROUTE_PEERS` | – | Comma-separated account ids or addresses messages are sent to individually. **Independent of the group route, not an alternative to it** — with both set, a message goes to both, which is how escalation is expressed: the team channel *and* whoever is carrying the pager. |
+| `FREIZONE_BOT_ROUTE_PEERS` | – | Comma-separated recipients messages are sent to individually — see [Addressing recipients](#addressing-recipients) for the accepted spellings. **Independent of the group route, not an alternative to it** — with both set, a message goes to both, which is how escalation is expressed: the team channel *and* whoever is carrying the pager. |
 | `FREIZONE_BOT_ROUTE_RULES` | – | Narrows where a message goes based on its **labels**, in order — the first matching rule decides. `severity:critical=group+peers,kind:digest=group` means a critical thing reaches the channel and the pager while a daily digest only goes to the channel. A message matching no rule goes everywhere configured, so a partial set never silently drops anything. An explicit `-route` wins over this. |
 | `FREIZONE_BOT_COMMANDERS` | – (off) | Comma-separated account ids that may command the bot. **Empty disables the command surface entirely** — the bot will not answer anybody. Deliberately not "whoever is in the group": group membership changes without you being told, a configured list changes when you change it. |
 | `FREIZONE_BOT_ALLOW_GROUP_COMMANDS` | `false` | Whether commands may be given in a group. Off by default: a command in a group is visible to everyone in it, its answer is too, and the membership drifts. With it off the bot takes instructions only in a one-to-one chat. |
@@ -188,6 +188,40 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_RATE_PER_MINUTE` | `20` | A hard ceiling on messages leaving per minute, with the excess collapsed into one "N further messages suppressed" line. Without it, one flapping service turns the bot into a denial of service on your own phone — and on your own server, whose per-device queue is bounded and starts refusing at 1000. |
 | `FREIZONE_BOT_OUTBOX_MAX` | `1000` | How many accepted-but-undelivered messages the outbox holds. Beyond it, `send` is refused with a non-zero exit rather than silently dropping: a loud rejection leaves the caller able to do something about it. |
 | `FREIZONE_BOT_MAINTENANCE_INTERVAL_MINUTES` | `360` | How often the periodic upkeep runs (topping up one-time prekeys, settling group facts, recovering sessions, re-sending confirmations) in addition to running on every reconnect. The timer matters more here than in a phone app: a phone reconnects constantly, while a server bot can hold one connection for weeks and would otherwise never run any of it again. |
+
+### Addressing recipients
+
+`FREIZONE_BOT_ROUTE_PEERS` accepts four spellings, all of them forms a person
+actually has in front of them:
+
+| Written | Means |
+| --- | --- |
+| `qlfxcdsa42x4xe4gwjcnu` | An account on the bot's own server |
+| `qlfxc-dsa42-x4xe4-gwjcnu` | The same account, in the hyphenated form the app displays |
+| `qlfxcdsa42x4xe4gwjcnu*chat.example.org` | An account on **another** server, reached over `https://` |
+| `qlfxcdsa42x4xe4gwjcnu*http://box.lan:18081` | The same, over a scheme you spelled out yourself |
+
+A bare host is given `https://`, because that is the only scheme a public
+Freizone server is reachable over. A scheme that is written out is left alone —
+that is how a local test server on plain HTTP gets named deliberately rather
+than by accident.
+
+The star form is what makes federation reachable at all: without a server, a
+recipient is looked up on the bot's own server, and an account that lives
+elsewhere simply is not there. Nothing warns you about that at send time, which
+is why every recipient is parsed when the configuration is read:
+
+- a truncated id is refused rather than completed. The app completes a prefix
+  while somebody types into a search box; a configuration file is not typed
+  under time pressure, and a half-written id resolving to whoever happens to
+  match is how an alert reaches a stranger.
+- a group id in `ROUTE_PEERS`, or an account id in `ROUTE_GROUP`, is refused by
+  name. The two differ by one leading character.
+- a recipient listed twice is refused. Collapsing it silently would hide the
+  likelier reading, which is that one of the two lines was meant to name
+  somebody else.
+- one bad entry fails the whole list. A bot that came up with three of four
+  recipients would page three people and look like it was working.
 
 ## Development
 

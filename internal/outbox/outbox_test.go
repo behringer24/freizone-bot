@@ -18,9 +18,9 @@ func testOutbox(t *testing.T, max int) *Outbox {
 }
 
 var dests = []outbound.Destination{
-	{Kind: outbound.KindGroup, ID: "qgroup"},
-	{Kind: outbound.KindPeer, ID: "qpeer1"},
-	{Kind: outbound.KindPeer, ID: "qpeer2"},
+	{Kind: outbound.KindGroup, ID: "plfxcdsa42x4xe4zr2mju"},
+	{Kind: outbound.KindPeer, ID: "qlfxcdsa42x4xe4gwjcnu"},
+	{Kind: outbound.KindPeer, ID: "qu0qmxckqmum0dv77pndv"},
 }
 
 // The rule the whole package is shaped around: one entry per destination, not
