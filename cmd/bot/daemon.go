@@ -7,8 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -220,27 +222,26 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 		return nil, &ipc.Error{Code: ipc.CodeBadRequest, Message: "nothing to send"}
 	}
 
-	dests, err := outbound.Resolve(d.cfg, body.Route, body.Severity)
+	dests, err := outbound.Resolve(d.cfg, body.Route, body.Labels)
 	if err != nil {
 		return nil, &ipc.Error{Code: ipc.CodeNoRoute, Message: err.Error()}
 	}
 
 	msg := outbound.Message{
-		Title:    body.Title,
-		Text:     body.Text,
-		Severity: body.Severity,
-		Source:   body.Source,
-		At:       body.At,
+		Title:  body.Title,
+		Text:   body.Text,
+		Labels: body.Labels,
+		At:     body.At,
 	}
 
 	// Deduplication before the rate cap, on purpose. They answer different
-	// questions -- "is this the same alert again" and "is too much leaving at
+	// questions -- "is this the same thing again" and "is too much leaving at
 	// once" -- and a repeat that the deduper would swallow should not consume a
 	// slot in the rate window on its way to being dropped. The other order would
-	// let one flapping check exhaust the budget for everything else.
+	// let one flapping producer exhaust the budget for everything else.
 	if allowed, note := d.deduper.Allow(msg, body.DedupKey); !allowed {
 		d.logger.Info("message suppressed as a duplicate",
-			"severity", body.Severity, "source", body.Source, "title", body.Title)
+			"title", body.Title, "labels", labelPairs(body.Labels))
 		return ipc.SendResponse{Suppressed: true, SuppressedBy: "duplicate"}, nil
 	} else if note != "" {
 		msg.Text += note
@@ -251,7 +252,7 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 		// Refused, not queued, and reported as such: a cap that silently
 		// swallows is indistinguishable from a bot that has died.
 		d.logger.Warn("message suppressed by the rate limit",
-			"source", body.Source, "severity", body.Severity)
+			"title", body.Title, "labels", labelPairs(body.Labels))
 		return ipc.SendResponse{Suppressed: true, SuppressedBy: "rate"}, nil
 	}
 	msg.Text += note
@@ -267,7 +268,7 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 		return nil, err
 	}
 	d.logger.Info("message queued",
-		"destinations", len(ids), "severity", body.Severity, "source", body.Source)
+		"destinations", len(ids), "title", body.Title, "labels", labelPairs(body.Labels))
 
 	if !body.Wait {
 		return ipc.SendResponse{Queued: len(ids)}, nil
@@ -275,6 +276,19 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 
 	delivered := d.deliverNow(ctx, ids)
 	return ipc.SendResponse{Queued: len(ids), Delivered: delivered}, nil
+}
+
+// labelPairs renders labels for a log line: sorted, so the same message logs
+// the same way twice rather than reshuffling with Go's map order.
+func labelPairs(labels map[string]string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(labels))
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		parts = append(parts, k+"="+labels[k])
+	}
+	return strings.Join(parts, " ")
 }
 
 func (d *daemon) handleStatus(context.Context, ipc.Request) (any, error) {

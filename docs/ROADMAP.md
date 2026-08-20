@@ -163,6 +163,33 @@ rather than during a demonstration.
   labels and the operator's own rules. This is for when it does not -- a shell
   script, a cron job, a check with none of that.
 
+- 2026-08-20 — **and then the whole shape of a message changed, because the
+  first version of the above had quietly turned this into an alerting tool
+  again.** `Message` had `Severity` and `Source` as fields of its own, the
+  renderer hard-coded `[CRITICAL]`, routing read severity and nothing else, and
+  deduplication keyed on the three of them. Every later capability -- a build
+  result, a scheduled digest, an answer to a command, a reading from a device --
+  would have had to bend itself into alerting vocabulary or grow a second set of
+  fields beside it.
+
+  A message now carries a title, a body and **labels**. `severity` and `source`
+  are conventions the renderer gives prominence to rather than special cases:
+  `-severity` and `-source` are shorthands for `-label`, and nothing breaks when
+  neither is present. Routing rules match any label
+  (`kind:digest=group,severity:critical=peers`), deduplication keys on the title
+  and the labels, and a message with no labels at all renders as plain text --
+  which is what a joke of the day or a command's answer looks like.
+
+  Verified with three messages down one pipeline: a one-liner with no labels, a
+  CI result labelled `repo`/`branch`/`kind`, and an ordinary alert. All three
+  arrived rendered as intended, and the alerting decoration appears only
+  *because* the labels are there.
+
+  Worth recording that this was the second time the drift happened: the plan had
+  already been rewritten to say "alerting is the first capability, not the shape
+  of the whole thing", and the implementation went straight back to fields
+  anyway. Labels were the fix both times.
+
 - **Open** — the third piece, pairing a `resolved` notice with the `firing` one
   it answers. Held back because it is the first thing that would make this bot
   hold state about *the world* rather than about its own recent output, and that

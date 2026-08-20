@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,11 +27,14 @@ import (
 // # What counts as the same message
 //
 // An explicit key when the caller gives one, because only the caller knows
-// whether two alerts are the same incident. Otherwise severity, title and
-// source -- and deliberately **not the body**, which routinely carries a
-// timestamp, a load average or a line number that differs every time while the
-// alert is plainly the same one. Hashing the body would make this feature do
-// nothing at all in exactly the cases it exists for.
+// whether two messages are the same event. Otherwise the title and the labels
+// -- and deliberately **not the body**, which routinely carries a timestamp, a
+// load average or a line number that differs every time while the thing being
+// reported is plainly the same. Hashing the body would make this do nothing at
+// all in exactly the cases it exists for.
+//
+// Labels are the right basis because that is what they are for: they describe
+// *which* thing this is, where the body describes its current state.
 type Deduper struct {
 	mu     sync.Mutex
 	window time.Duration
@@ -98,6 +103,26 @@ func (d *Deduper) Allow(m Message, key string) (allowed bool, note string) {
 		phrase, r.first.UTC().Format("15:04:05 UTC"))
 }
 
+// DedupKey is what makes two messages "the same" here. Exported so a test and a
+// caller cannot disagree about it.
+//
+// Title plus every label, sorted -- labels say which thing this is. The body is
+// left out on purpose; see the note at the top of the file.
+func DedupKey(m Message, explicit string) string {
+	if explicit != "" {
+		return "k:" + explicit
+	}
+	var b strings.Builder
+	b.WriteString(m.Title)
+	for _, k := range slices.Sorted(maps.Keys(m.Labels)) {
+		b.WriteString("\x00" + k + "=" + m.Labels[k])
+	}
+	// Hashed rather than kept whole so an unbounded title cannot become an
+	// unbounded map key.
+	sum := sha256.Sum256([]byte(b.String()))
+	return "h:" + hex.EncodeToString(sum[:8])
+}
+
 // Suppressed is how many repeats are currently unreported, across all keys.
 func (d *Deduper) Suppressed() int {
 	d.mu.Lock()
@@ -122,16 +147,4 @@ func (d *Deduper) evictLocked(now time.Time) {
 			delete(d.seen, k)
 		}
 	}
-}
-
-// DedupKey is what makes two messages "the same" here. Exported so a test and a
-// caller cannot disagree about it.
-func DedupKey(m Message, explicit string) string {
-	if explicit != "" {
-		return "k:" + explicit
-	}
-	// Hashed rather than concatenated so an unbounded title cannot become an
-	// unbounded map key.
-	sum := sha256.Sum256([]byte(strings.ToLower(m.Severity) + "\x00" + m.Title + "\x00" + m.Source))
-	return "h:" + hex.EncodeToString(sum[:8])
 }

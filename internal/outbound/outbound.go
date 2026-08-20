@@ -4,17 +4,44 @@
 // several capabilities share one delivery path. When the webhook receiver lands
 // it becomes a second producer for the same queue, which is why none of this
 // knows anything about alerts.
+//
+// # Why labels rather than fields
+//
+// A message carries a title, a body, and labels. It deliberately does *not*
+// carry a severity, a source, a host or a job as fields of their own, even
+// though the first thing built on top of this was operations alerting and those
+// are exactly what an alert has.
+//
+// Fields would have quietly made this an alerting tool. Everything else the bot
+// is meant to carry -- a build result, a scheduled digest, an answer to a
+// command, a reading from a device -- would have had to bend itself into
+// alerting vocabulary, or grow a second set of fields beside it. Labels cost
+// nothing and describe all of them: `severity=critical` and `repo=freizone-app`
+// and `device=sensor-3` are the same shape.
+//
+// `severity` and `source` are *conventions* rather than special cases: the
+// renderer gives them prominence because that is what people put there, and
+// nothing breaks when they are absent or when something else is used instead.
 package outbound
 
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/behringer24/freizone-bot/internal/config"
 	"github.com/behringer24/freizone-server/pkg/client"
+)
+
+// Conventional label names. Not privileged in the data model -- only in how the
+// renderer lays a message out, because a reader scanning a notification wants
+// the urgency first and the origin next to the headline.
+const (
+	LabelSeverity = "severity"
+	LabelSource   = "source"
 )
 
 // Kind says how a destination is addressed. A group and a person take different
@@ -41,38 +68,64 @@ const (
 	RoutePeers = "peers"
 )
 
-// Message is what gets delivered. Deliberately not called an alert: the same
-// shape carries a scheduled report, a command's answer, and whatever a webhook
-// brings later.
+// Message is what gets delivered.
 type Message struct {
-	Title    string    `json:"title,omitempty"`
-	Text     string    `json:"text,omitempty"`
-	Severity string    `json:"severity,omitempty"`
-	Source   string    `json:"source,omitempty"`
-	At       time.Time `json:"at"`
+	// Title is the headline: what happened, in one line.
+	Title string `json:"title,omitempty"`
+
+	// Text is the detail underneath it.
+	Text string `json:"text,omitempty"`
+
+	// Labels describe the message for routing, deduplication and display.
+	// Free-form on purpose -- whatever produced this message already has its own
+	// vocabulary, and making it match one invented here would be work for
+	// nobody's benefit.
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// At is when the thing being reported happened, which is not necessarily
+	// when it is delivered. A message that waited out a retry says so rather
+	// than looking current.
+	At time.Time `json:"at"`
+}
+
+// Label returns one label, or the empty string.
+func (m Message) Label(name string) string {
+	if m.Labels == nil {
+		return ""
+	}
+	return m.Labels[name]
 }
 
 // Render is what actually reaches a chat.
 //
 // One plain-text block, because that is all a Freizone message is -- there is no
-// markup on the wire and inventing one here would only look like markup on the
-// receiving side. The timestamp is included only when the message is being
-// delivered late, so an ordinary message does not carry a line every reader can
-// already see from the chat itself.
+// markup on the wire, and inventing some here would only look like markup on the
+// receiving side.
+//
+// The layout follows the two conventional labels and then lists the rest:
+//
+//	[CRITICAL] disk full on web01 (web01)
+//
+//	/ at 98%
+//
+//	job=disk-check region=eu
+//
+// Nothing here is required. A message with no labels renders as a title and a
+// body, which is what a command's answer or a digest looks like.
 func (m Message) Render(now time.Time) string {
 	var b strings.Builder
 
-	if m.Severity != "" {
-		b.WriteString("[" + strings.ToUpper(m.Severity) + "] ")
+	if sev := m.Label(LabelSeverity); sev != "" {
+		b.WriteString("[" + strings.ToUpper(sev) + "] ")
 	}
 	if m.Title != "" {
 		b.WriteString(m.Title)
 	}
-	if m.Source != "" {
+	if src := m.Label(LabelSource); src != "" {
 		if m.Title != "" {
 			b.WriteString(" ")
 		}
-		b.WriteString("(" + m.Source + ")")
+		b.WriteString("(" + src + ")")
 	}
 	if m.Text != "" {
 		if b.Len() > 0 {
@@ -81,17 +134,40 @@ func (m Message) Render(now time.Time) string {
 		b.WriteString(m.Text)
 	}
 
+	// The remaining labels, sorted so the same message always reads the same
+	// way -- Go's map order would otherwise reshuffle them on every send and
+	// make two identical messages look different.
+	if rest := m.otherLabels(); len(rest) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(strings.Join(rest, " "))
+	}
+
 	// Late is anything more than a couple of minutes old by the time it goes.
-	// Said plainly rather than as a bare timestamp: a reader seeing an old alert
-	// needs to know it is old, not to do arithmetic.
+	// Said plainly rather than as a bare timestamp: a reader seeing something
+	// old needs to know it is old, not to do arithmetic.
 	if !m.At.IsZero() && now.Sub(m.At) > 2*time.Minute {
 		b.WriteString(fmt.Sprintf("\n\n(from %s, delivered late)", m.At.UTC().Format("2006-01-02 15:04:05 UTC")))
 	}
 	return b.String()
 }
 
+// otherLabels is every label except the two the layout already showed, as
+// sorted `key=value` strings.
+func (m Message) otherLabels() []string {
+	var out []string
+	for _, k := range slices.Sorted(maps.Keys(m.Labels)) {
+		if k == LabelSeverity || k == LabelSource {
+			continue
+		}
+		out = append(out, k+"="+m.Labels[k])
+	}
+	return out
+}
+
 // Resolve is where a message goes, given the configuration, an optional named
-// route and the message's severity.
+// route and the message's labels.
 //
 // The group and the peers are independent rather than alternatives: with both
 // configured a message goes to both, which is how escalation is expressed --
@@ -100,14 +176,14 @@ func (m Message) Render(now time.Time) string {
 // Three things can narrow that, in this order of authority:
 //
 //  1. An explicit route on the request. The caller asked for one thing.
-//  2. A severity mapping in the configuration, which is the standing rule for
-//     what warrants waking somebody.
+//  2. A matching routing rule, which is the standing decision about what goes
+//     where.
 //  3. Nothing, meaning every configured route.
 //
-// The explicit route wins over the severity mapping deliberately: a person
-// typing `-route peers` is doing something out of the ordinary on purpose, and
-// having configuration override that would make the flag a suggestion.
-func Resolve(cfg *config.Config, route, severity string) ([]Destination, error) {
+// The explicit route wins over the rules deliberately: somebody naming a route
+// is doing something out of the ordinary on purpose, and having configuration
+// override that would make the flag a suggestion.
+func Resolve(cfg *config.Config, route string, labels map[string]string) ([]Destination, error) {
 	var out []Destination
 
 	wantGroup := route == "" || route == RouteGroup
@@ -117,11 +193,12 @@ func Resolve(cfg *config.Config, route, severity string) ([]Destination, error) 
 		return nil, fmt.Errorf("unknown route %q (known: %s, %s)", route, RouteGroup, RoutePeers)
 	}
 
-	// The severity mapping only applies when the caller did not name a route.
-	if route == "" && len(cfg.SeverityRoutes) > 0 {
-		if names, ok := cfg.SeverityRoutes[strings.ToLower(strings.TrimSpace(severity))]; ok {
-			wantGroup = slices.Contains(names, RouteGroup)
-			wantPeers = slices.Contains(names, RoutePeers)
+	var matched *config.RouteRule
+	if route == "" {
+		matched = cfg.MatchRoute(labels)
+		if matched != nil {
+			wantGroup = slices.Contains(matched.Routes, RouteGroup)
+			wantPeers = slices.Contains(matched.Routes, RoutePeers)
 		}
 	}
 	if wantGroup && cfg.RouteGroup != "" {
@@ -136,14 +213,14 @@ func Resolve(cfg *config.Config, route, severity string) ([]Destination, error) 
 		switch {
 		case route != "":
 			return nil, fmt.Errorf("route %q is not configured", route)
-		case severity != "" && len(cfg.SeverityRoutes) > 0:
+		case matched != nil:
 			// Distinguished from "nothing configured at all", because the fix is
-			// different: here the routing rule and the configured routes
-			// disagree, and an operator needs to know which of the two to
-			// change.
+			// different: here a routing rule and the configured routes disagree,
+			// and an operator needs to know which of the two to change.
 			return nil, fmt.Errorf(
-				"severity %q is routed somewhere this bot has no route for -- check %s against the configured routes",
-				severity, "FREIZONE_BOT_SEVERITY_ROUTES")
+				"the rule %s=%s sends to a route this bot has no destination for -- "+
+					"check FREIZONE_BOT_ROUTE_RULES against the configured routes",
+				matched.Label, matched.Value)
 		default:
 			return nil, fmt.Errorf("no route configured")
 		}

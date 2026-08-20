@@ -31,7 +31,7 @@ func cfgWith(t *testing.T, group string, peers string) *config.Config {
 // a message goes to both, which is how escalation is expressed -- the team
 // channel *and* whoever is carrying the pager.
 func TestBothRoutesReceiveByDefault(t *testing.T) {
-	dests, err := Resolve(cfgWith(t, "qgroup", "qpeer1,qpeer2"), "", "")
+	dests, err := Resolve(cfgWith(t, "qgroup", "qpeer1,qpeer2"), "", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestBothRoutesReceiveByDefault(t *testing.T) {
 func TestOneRouteCanBeNamed(t *testing.T) {
 	cfg := cfgWith(t, "qgroup", "qpeer1,qpeer2")
 
-	onlyGroup, err := Resolve(cfg, RouteGroup, "")
+	onlyGroup, err := Resolve(cfg, RouteGroup, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestOneRouteCanBeNamed(t *testing.T) {
 		t.Errorf("want just the group, got %+v", onlyGroup)
 	}
 
-	onlyPeers, err := Resolve(cfg, RoutePeers, "")
+	onlyPeers, err := Resolve(cfg, RoutePeers, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestOneRouteCanBeNamed(t *testing.T) {
 // A typo in a route name has to be refused rather than quietly sending
 // everywhere, or nowhere.
 func TestAnUnknownRouteIsRefused(t *testing.T) {
-	_, err := Resolve(cfgWith(t, "qgroup", ""), "oncall", "")
+	_, err := Resolve(cfgWith(t, "qgroup", ""), "oncall", nil)
 	if err == nil {
 		t.Fatal("an unknown route must be refused")
 	}
@@ -78,14 +78,14 @@ func TestAnUnknownRouteIsRefused(t *testing.T) {
 // Naming a route that exists as a name but has nothing configured is its own
 // case: the operator asked for something specific and it is not set up.
 func TestANamedRouteWithNothingConfiguredIsRefused(t *testing.T) {
-	_, err := Resolve(cfgWith(t, "qgroup", ""), RoutePeers, "")
+	_, err := Resolve(cfgWith(t, "qgroup", ""), RoutePeers, nil)
 	if err == nil {
 		t.Fatal("asking for the peer route with no peers configured must be refused")
 	}
 }
 
 func TestNoRouteAtAllIsRefused(t *testing.T) {
-	if _, err := Resolve(cfgWith(t, "", ""), "", ""); err == nil {
+	if _, err := Resolve(cfgWith(t, "", ""), "", nil); err == nil {
 		t.Fatal("a message with nowhere to go must be refused")
 	}
 }
@@ -95,11 +95,10 @@ func TestNoRouteAtAllIsRefused(t *testing.T) {
 func TestRenderReadsAsOneBlock(t *testing.T) {
 	now := time.Now().UTC()
 	got := Message{
-		Severity: "critical",
-		Title:    "disk full on web01",
-		Source:   "web01",
-		Text:     "/ at 98%",
-		At:       now,
+		Title:  "disk full on web01",
+		Text:   "/ at 98%",
+		Labels: map[string]string{LabelSeverity: "critical", LabelSource: "web01"},
+		At:     now,
 	}.Render(now)
 
 	for _, want := range []string{"CRITICAL", "disk full on web01", "web01", "/ at 98%"} {
