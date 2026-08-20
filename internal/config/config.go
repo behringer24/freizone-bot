@@ -42,6 +42,7 @@ const (
 	envCommanders        = "FREIZONE_BOT_COMMANDERS"
 	envAllowGroupCommand = "FREIZONE_BOT_ALLOW_GROUP_COMMANDS"
 	envJokesFile         = "FREIZONE_BOT_JOKES_FILE"
+	envAcceptInvites     = "FREIZONE_BOT_ACCEPT_GROUP_INVITES"
 
 	envMaxAge    = "FREIZONE_BOT_MAX_AGE_MINUTES"
 	envRate      = "FREIZONE_BOT_RATE_PER_MINUTE"
@@ -144,6 +145,13 @@ type Config struct {
 	// the membership changes without the operator.
 	AllowGroupCommands bool
 
+	// AcceptGroupInvites lets anybody who knows this address pull the bot into a
+	// group of theirs. Off by default: an invitation the operator did not ask for
+	// is a stranger deciding what this bot is a member of, and from then on it
+	// holds that group's facts and receives its traffic. The configured route
+	// group is always accepted regardless -- naming it *is* asking for it.
+	AcceptGroupInvites bool
+
 	// JokesFile replaces the built-in set for the joke action. Empty keeps the
 	// built-in one.
 	JokesFile string
@@ -168,19 +176,18 @@ func Load(getenv func(string) string) (*Config, error) {
 		JokesFile:     strings.TrimSpace(getenv(envJokesFile)),
 	}
 
-	if raw := strings.TrimSpace(getenv(envAllowGroupCommand)); raw != "" {
-		allow, err := strconv.ParseBool(raw)
-		if err != nil {
-			return nil, fmt.Errorf("%s: invalid value %q (true or false): %w", envAllowGroupCommand, raw, err)
-		}
-		cfg.AllowGroupCommands = allow
-	}
-
 	level, err := parseLogLevel(orDefault(getenv(envLogLevel), "info"))
 	if err != nil {
 		return nil, err
 	}
 	cfg.LogLevel = level
+
+	if cfg.AcceptGroupInvites, err = boolOr(getenv, envAcceptInvites, false); err != nil {
+		return nil, err
+	}
+	if cfg.AllowGroupCommands, err = boolOr(getenv, envAllowGroupCommand, false); err != nil {
+		return nil, err
+	}
 
 	if cfg.InviteCode, err = loadInviteCode(getenv); err != nil {
 		return nil, err
@@ -431,4 +438,17 @@ func orDefault(v, def string) string {
 		return def
 	}
 	return strings.TrimSpace(v)
+}
+
+// boolOr reads a boolean setting, or its default when unset.
+func boolOr(getenv func(string) string, env string, def bool) (bool, error) {
+	raw := strings.TrimSpace(getenv(env))
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s: invalid value %q (true or false): %w", env, raw, err)
+	}
+	return v, nil
 }

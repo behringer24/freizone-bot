@@ -120,15 +120,16 @@ func runDaemon(args []string) error {
 	upkeepWanted := make(chan struct{}, 1)
 
 	d := &daemon{
-		cfg:     cfg,
-		client:  c,
-		logger:  logger,
-		box:     box,
-		sender:  outbound.NewSender(c),
-		limiter: outbound.NewLimiter(cfg.RatePerMinute, time.Now),
-		deduper: outbound.NewDeduper(cfg.DedupWindow, time.Now),
-		started: time.Now(),
-		id:      id,
+		cfg:              cfg,
+		client:           c,
+		logger:           logger,
+		box:              box,
+		sender:           outbound.NewSender(c),
+		limiter:          outbound.NewLimiter(cfg.RatePerMinute, time.Now),
+		deduper:          outbound.NewDeduper(cfg.DedupWindow, time.Now),
+		started:          time.Now(),
+		acceptInvitation: c.AcceptGroupInvitation,
+		id:               id,
 	}
 
 	// The command surface, if one is configured. Built after d exists because
@@ -161,7 +162,7 @@ func runDaemon(args []string) error {
 	ctrlErr := make(chan error, 1)
 	go func() { ctrlErr <- ctrl.Serve() }()
 
-	upkeepDone := runUpkeep(ctx, c, cfg, logger, upkeepWanted)
+	upkeepDone := runUpkeep(ctx, d, upkeepWanted)
 	streamDone := runStream(ctx, c, logger, upkeepWanted, d)
 	outboxDone := runOutbox(ctx, d)
 
@@ -214,6 +215,12 @@ type daemon struct {
 	deduper *outbound.Deduper
 	started time.Time
 	id      client.Identity
+
+	// acceptInvitation joins a group. A field rather than a direct call so the
+	// *decision* about which invitations to answer is testable without a server
+	// and an account -- the protocol call itself is pkg/client's, and has its
+	// own tests there.
+	acceptInvitation func(ctx context.Context, groupID string) error
 
 	// The inbound half. Nil interpreter means no command surface is configured,
 	// which is the default -- see internal/authz on why that fails closed.
@@ -308,6 +315,65 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 
 	delivered := d.deliverNow(ctx, ids)
 	return ipc.SendResponse{Queued: len(ids), Delivered: delivered}, nil
+}
+
+// onReceived is everything the bot itself owes an envelope, once the core has
+// finished with it.
+//
+// One function, called from both the live stream and the queue drain, and that
+// is the whole reason it exists. Those two paths had drifted: the command
+// dispatch hung off the stream alone, so anything that arrived while the bot
+// was down was stored and then never answered -- and a group invitation that
+// came in the same window was never seen at all. SRV-30 put the *envelope*
+// handling in one place for exactly this reason; this is the same discipline one
+// layer up, where the bot's own follow-up lives.
+func (d *daemon) onReceived(ctx context.Context, res client.ReceiveResult) {
+	d.maybeJoinGroup(ctx, res)
+	d.dispatch(ctx, res)
+}
+
+// maybeJoinGroup answers an invitation, when it is one the operator asked for.
+//
+// A group membership is not real until the invited account says so -- the fact
+// set records the invitation, and `join_accept` is what turns it into
+// membership (see freizone-server's design/01-groups.md). Nothing else in this
+// bot ever sent that, which meant a configured group route could not work at
+// all: the bot sat invited forever and its messages went to a group it was not
+// in.
+//
+// Which invitations to answer is deliberately narrow. The configured route
+// group is accepted because the operator named it -- they cannot have named it
+// by accident. Anything else needs FREIZONE_BOT_ACCEPT_GROUP_INVITES, because
+// accepting freely means anyone who knows this bot's address can pull it into
+// a group of theirs, and from then on it holds that group's facts and receives
+// its traffic.
+func (d *daemon) maybeJoinGroup(ctx context.Context, res client.ReceiveResult) {
+	if res.Group == nil || !res.Group.Invited {
+		return
+	}
+	groupID := res.Group.GroupID
+
+	switch {
+	case groupID == d.cfg.RouteGroup:
+		// The one the operator configured. Joining is the whole point.
+	case d.cfg.AcceptGroupInvites:
+		// Explicitly opted in to being invitable.
+	default:
+		// Left unanswered rather than declined: declining is a signed fact that
+		// says something, and the honest state here is "nobody asked this bot
+		// to be in that group". Said at info, because the person who sent the
+		// invitation is waiting for something that will not happen, and the
+		// operator is the only one who can explain why.
+		d.logger.Info("ignoring an invitation to a group this bot was not configured for",
+			"group", groupID, "invited_by", res.PeerAccountID)
+		return
+	}
+
+	if err := d.acceptInvitation(ctx, groupID); err != nil {
+		d.logger.Error("could not accept a group invitation", "group", groupID, "error", err)
+		return
+	}
+	d.logger.Info("joined a group", "group", groupID, "invited_by", res.PeerAccountID)
 }
 
 // dispatch is the inbound half: a message somebody sent the bot, possibly
@@ -621,7 +687,7 @@ func runStream(ctx context.Context, c *client.Client, logger *slog.Logger, upkee
 					"duplicate", res.Duplicate,
 					"group", res.Group != nil)
 
-				d.dispatch(ctx, res)
+				d.onReceived(ctx, res)
 
 			case client.StreamDisconnected:
 				// Routine, not a failure: the core reconnects on its own, and a
@@ -647,11 +713,11 @@ func runStream(ctx context.Context, c *client.Client, logger *slog.Logger, upkee
 // for weeks, and then none of this would ever run again: the one-time prekey
 // pool would drain toward empty with nothing to notice, and a group snapshot
 // debt incurred in hour two would still be owed in week three.
-func runUpkeep(ctx context.Context, c *client.Client, cfg *config.Config, logger *slog.Logger, wanted <-chan struct{}) <-chan struct{} {
+func runUpkeep(ctx context.Context, d *daemon, wanted <-chan struct{}) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(cfg.MaintenanceInterval)
+		ticker := time.NewTicker(d.cfg.MaintenanceInterval)
 		defer ticker.Stop()
 
 		var last time.Time
@@ -664,48 +730,56 @@ func runUpkeep(ctx context.Context, c *client.Client, cfg *config.Config, logger
 			}
 
 			if !last.IsZero() && time.Since(last) < minUpkeepSpacing {
-				logger.Debug("upkeep skipped, ran recently", "since", time.Since(last))
+				d.logger.Debug("upkeep skipped, ran recently", "since", time.Since(last))
 				continue
 			}
 			last = time.Now()
-			upkeep(ctx, c, logger)
+			d.upkeep(ctx)
 		}
 	}()
 	return done
 }
 
-func upkeep(ctx context.Context, c *client.Client, logger *slog.Logger) {
+func (d *daemon) upkeep(ctx context.Context) {
 	// The queue first: it holds everything that arrived while nothing was
 	// listening, and leaving it would let it grow to the server's per-device
 	// cap -- past which every sender to this bot starts being refused.
-	report, err := c.Drain(ctx, client.ReceiveOptions{})
+	report, err := d.client.Drain(ctx, client.ReceiveOptions{})
 	if err != nil {
-		logger.Warn("could not drain the queue", "error", err)
+		d.logger.Warn("could not drain the queue", "error", err)
 	} else {
 		if len(report.Results) > 0 {
-			logger.Info("queue drained", "handled", len(report.Results))
+			d.logger.Info("queue drained", "handled", len(report.Results))
+		}
+		// Every drained envelope goes through the same follow-up the live
+		// stream gives one. Counting them and moving on -- which is what this
+		// did before -- meant a command sent while the bot was down was stored
+		// and never answered, and an invitation that arrived in that window was
+		// never seen.
+		for _, res := range report.Results {
+			d.onReceived(ctx, res)
 		}
 		for _, f := range report.Failures {
-			logger.Warn("could not read a queued envelope",
+			d.logger.Warn("could not read a queued envelope",
 				"message_id", f.MessageID, "sender", f.SenderAccountID,
 				"acknowledged", f.Acknowledged, "error", f.Err)
 		}
 	}
 
-	m := c.Maintain(ctx)
-	logger.Debug("maintenance done",
+	m := d.client.Maintain(ctx)
+	d.logger.Debug("maintenance done",
 		"prekeys_topped_up", m.PrekeysToppedUp,
 		"debts_paid", m.DebtsPaid,
 		"sessions_recovered", len(m.Recovered),
 		"receipts_resent", m.ReceiptsResent,
 	)
 	for _, p := range m.Problems {
-		logger.Warn("maintenance problem", "error", p)
+		d.logger.Warn("maintenance problem", "error", p)
 	}
 	// Said here because nothing else ever will: a member whose account is gone
 	// keeps their row in the group until a moderator removes it, and this is
 	// the only moment anything found out.
 	for _, gone := range m.GoneMembers {
-		logger.Warn("group member's account no longer exists", "account", gone)
+		d.logger.Warn("group member's account no longer exists", "account", gone)
 	}
 }

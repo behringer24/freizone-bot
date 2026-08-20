@@ -4,13 +4,13 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Why this exists:** operations alerting is the first thing it does. A monitoring system that pages you through Slack or Telegram hands every alert — hostnames, internal addresses, stack traces, sometimes a credential in a log line — to a third party. Freizone is end-to-end encrypted and self-hosted, so the same alert reaches the same phone without anyone in between being able to read it. Alerting is the first capability rather than the shape of the whole thing: the same daemon is where a server-assistant, a command bot and later integrations live.
 
-**Status:** `BOT-01` works — the daemon registers its own account, holds a live connection, and delivers messages handed to it over a local socket, with a durable queue and retries behind them. It has been driven end to end against a real server, not only in tests. What is not there yet is everything above that: deduplication and storm handling (`BOT-03`), a webhook receiver (`BOT-08`), commands (`BOT-05`). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+**Status:** `BOT-01`, `BOT-02`, `BOT-05` and most of `BOT-03` work, driven end to end against a real server rather than only in tests: the daemon registers its own account, joins the group it was configured for, delivers messages handed to it over a local socket with a durable queue behind them, and answers commands from an allow-listed sender. Not there yet: pairing a `resolved` notice with its `firing` (`BOT-03`), a webhook receiver (`BOT-08`), a server-assistant role (`BOT-09`), interpretation by a model (`BOT-10`). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## What the bot never does
 
 - **It opens no network listener.** Its only ingress is a unix socket inside its own state directory, reachable by whoever the operator puts in one group and nobody else. There is no port to expose and no `EXPOSE` line in the Dockerfile — when that changes, it will be a deliberate release with its own authentication design ([`BOT-08`](docs/ROADMAP.md)), not a configuration flag somebody flips.
 - **It implements none of the Freizone protocol.** Encryption, sessions, delivery semantics and group convergence all live in freizone-server's [`pkg/client`](https://github.com/behringer24/freizone-server/tree/master/pkg/client), which the app uses too. The bot's own code begins after a message has been decrypted.
-- **It never logs message bodies.** They land permanently in every recipient's transcript and routinely carry things that should not also sit in a log file. Title and severity are enough.
+- **It never logs message bodies.** They land permanently in every recipient's transcript and routinely carry things that should not also sit in a log file. Title and labels are enough.
 
 ## Security model
 
@@ -54,6 +54,12 @@ freizone-bot run
 ```
 
 A daemon with no route refuses to start rather than warning: one that accepts messages with nowhere to put them is worse than one that is plainly not configured.
+
+### Putting it in a group
+
+Create the group in the app, copy its id into `FREIZONE_BOT_ROUTE_GROUP`, then invite the bot to it. **It accepts that invitation by itself** — naming the group in the configuration is what asks for it.
+
+Invitations to any *other* group are left unanswered unless you set `FREIZONE_BOT_ACCEPT_GROUP_INVITES=true`. That is deliberate: an invitation you did not ask for is somebody else deciding what your bot is a member of, and from then on it holds that group's facts and receives its traffic. The bot never declines either — declining is a signed fact that says something, and the honest state is "nobody asked this bot to be there".
 
 ## Sending a message
 
@@ -168,7 +174,8 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_LOG_LEVEL` | `info` | `debug` · `info` · `warn` (or `warning`) · `error`. |
 | `FREIZONE_BOT_CONTROL_SOCKET` | `<STATE_DIR>/control.sock` | Where the daemon listens for the CLI. Defaulting inside the state directory means a CLI invocation that inherits the daemon's environment needs no further configuration, and a container's data volume carries it. `/run/freizone-bot/control.sock` is the more conventional place under systemd (`RuntimeDirectory=freizone-bot`) and is not the default only because that path does not exist in a container. |
 | `FREIZONE_BOT_CONTROL_GROUP` | – | A group that owns the socket's parent directory, so members of it may talk to the daemon. Unset leaves the directory to the daemon's own user alone. |
-| `FREIZONE_BOT_ROUTE_GROUP` | – | A group id messages are sent to. |
+| `FREIZONE_BOT_ROUTE_GROUP` | – | A group id messages are sent to. The bot **accepts an invitation to this group automatically** — naming it is asking for it. Create the group, invite the bot, and it joins on its own. |
+| `FREIZONE_BOT_ACCEPT_GROUP_INVITES` | `false` | Whether the bot accepts invitations to *other* groups too. Off by default: an invitation you did not ask for is a stranger deciding what your bot is a member of, and from then on it holds that group’s facts and receives its traffic. |
 | `FREIZONE_BOT_ROUTE_PEERS` | – | Comma-separated account ids or addresses messages are sent to individually. **Independent of the group route, not an alternative to it** — with both set, a message goes to both, which is how escalation is expressed: the team channel *and* whoever is carrying the pager. |
 | `FREIZONE_BOT_ROUTE_RULES` | – | Narrows where a message goes based on its **labels**, in order — the first matching rule decides. `severity:critical=group+peers,kind:digest=group` means a critical thing reaches the channel and the pager while a daily digest only goes to the channel. A message matching no rule goes everywhere configured, so a partial set never silently drops anything. An explicit `-route` wins over this. |
 | `FREIZONE_BOT_COMMANDERS` | – (off) | Comma-separated account ids that may command the bot. **Empty disables the command surface entirely** — the bot will not answer anybody. Deliberately not "whoever is in the group": group membership changes without you being told, a configured list changes when you change it. |
