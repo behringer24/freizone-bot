@@ -42,6 +42,32 @@ Acceptance: a `systemd OnFailure=` unit pipes into `freizone-bot send`, and the
 message arrives in the operator's Freizone group with the bot as a member.
 
 - 2026-08-17 — repo created, skeleton in place
+- 2026-08-20 — the receiving half works, verified against a real server: the
+  daemon registers itself on first start, prints the one fact an operator must
+  act on (its address, on stderr as well as in the log, plus `<state>/address`
+  and `freizone-bot whoami`), holds the stream up, drains the queue and runs
+  the periodic upkeep. `whoami` reads the address file rather than opening the
+  account, so it answers while the daemon holds it.
+
+  A daemon with no route **refuses to start** rather than warning: one that
+  accepts messages with nowhere to put them is worse than one that is plainly
+  not configured. Registering with no route is still a legitimate first run,
+  which is why the address is printed before that refusal.
+
+  Two things the real run turned up. The stream loop logged only *failures*, so
+  a handled message produced no line at all — an operator could not tell a live
+  stream from one that was merely connected; it now says so at debug, without
+  the text, which is somebody's private message and already in the transcript.
+  And the account-in-use refusal read its own fact twice and leaked
+  `pkg/client`'s package prefix into a message a person reads, the same leak
+  freizone-app fixed on 2026-08-16 — the CLI now strips it once, at the top.
+
+  Also seen working in the wild rather than in a test: a confirmation that had
+  never got out was re-sent on the next connect (`receipts_resent: 1`), which
+  is exactly what the upkeep exists for.
+
+  Still open in this item: the control socket, the routes and
+  `freizone-bot send` — everything on the *sending* side.
 
 ### BOT-02 — One-to-one routes
 Status: `planned`
