@@ -4,7 +4,7 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Why this exists:** operations alerting is the first thing it does. A monitoring system that pages you through Slack or Telegram hands every alert — hostnames, internal addresses, stack traces, sometimes a credential in a log line — to a third party. Freizone is end-to-end encrypted and self-hosted, so the same alert reaches the same phone without anyone in between being able to read it. Alerting is the first capability rather than the shape of the whole thing: the same daemon is where a server-assistant, a command bot and later integrations live.
 
-**Status:** early. The daemon registers its own account, holds a live connection, drains whatever is queued for it and keeps itself healthy. What it cannot do yet is **send** — the control socket, the routes and `freizone-bot send` are the rest of `BOT-01`, see [`docs/ROADMAP.md`](docs/ROADMAP.md). So it is worth starting to get an address, and not yet worth relying on.
+**Status:** `BOT-01` works — the daemon registers its own account, holds a live connection, and delivers messages handed to it over a local socket, with a durable queue and retries behind them. It has been driven end to end against a real server, not only in tests. What is not there yet is everything above that: deduplication and storm handling (`BOT-03`), a webhook receiver (`BOT-08`), commands (`BOT-05`). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## What the bot never does
 
@@ -54,6 +54,52 @@ freizone-bot run
 ```
 
 A daemon with no route refuses to start rather than warning: one that accepts messages with nowhere to put them is worse than one that is plainly not configured.
+
+## Sending a message
+
+The daemon owns the account, so the CLI does not open it — it hands the message to the running daemon over a local socket. Same binary, which is also why `docker exec <container> /freizone-bot send …` works with no shell in the image.
+
+```sh
+freizone-bot send "disk full on web01"
+freizone-bot send -severity critical -title "disk full on web01" -source web01 "/ at 98%"
+journalctl -u nginx -n 20 | freizone-bot send -title "nginx is down on web01"
+```
+
+Text comes from an argument, or from standard input when no argument is given — **never both**. That is not a style choice: reading standard input whenever it is not a terminal hangs forever under a service manager or a CI runner, where it is routinely an open pipe nobody ever closes. An alerting tool that blocks at the moment it is needed is the worst failure available to it.
+
+The call returns once the message is **durably queued**, not once it is delivered — so `exit 0` means "this will be delivered or loudly reported", never "accepted into a buffer a restart discards". Delivery is retried with a backoff, and given up on after `FREIZONE_BOT_MAX_AGE_MINUTES` with an error in the log naming the message and where it was going. Pass `-wait` to block for delivery instead.
+
+Exit codes, since this ends up inside shell scripts:
+
+| code | meaning |
+|---|---|
+| 0 | queued (or delivered, with `-wait`) |
+| 1 | usage or configuration problem |
+| 2 | the daemon refused it — unknown route, outbox full |
+| 3 | the daemon failed |
+| 4 | no daemon is running |
+| 5 | timed out waiting for the daemon |
+
+`freizone-bot status` asks the running daemon for its address, whether it is connected, and how much is waiting.
+
+### With systemd
+
+Three lines, and every failing service on the host pages you:
+
+```ini
+[Unit]
+OnFailure=freizone-alert@%n.service
+```
+
+```ini
+# /etc/systemd/system/freizone-alert@.service
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/freizone-bot.env
+ExecStart=/usr/local/bin/freizone-bot send -severity critical -title "%i failed" -source %H
+```
+
+Nagios, Icinga, Zabbix, Sensu, cron and CI steps all take the same shape — anything that can run a command. Alertmanager cannot: it has no exec receiver and only posts webhooks, so it needs `BOT-08`.
 
 ## Local development
 
