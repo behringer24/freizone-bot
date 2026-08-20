@@ -39,7 +39,8 @@ func runSend(args []string) error {
 	title := fs.String("title", "", "the headline: what happened, in one line")
 	severity := fs.String("severity", "", "free-form severity, shown in front of the title (e.g. info, warning, critical)")
 	source := fs.String("source", "", "where this came from -- a host, a unit, a job")
-	route := fs.String("route", "", "send only to one configured route (\"group\" or \"peers\"); default is every configured route")
+	route := fs.String("route", "", "send only to one configured route (\"group\" or \"peers\"); default lets the severity mapping decide, and failing that every configured route")
+	dedupKey := fs.String("dedup-key", "", "which incident this is, for the deduplication window; default is severity+title+source")
 	wait := fs.Bool("wait", false, "wait for delivery instead of returning once the message is durably queued")
 	timeout := fs.Duration("timeout", 10*time.Second, "how long to wait for the daemon")
 	fs.Parse(args) //nolint:errcheck // ExitOnError
@@ -59,7 +60,7 @@ func runSend(args []string) error {
 
 	body, err := json.Marshal(ipc.SendRequest{
 		Title: *title, Text: text, Severity: *severity, Source: *source,
-		At: time.Now().UTC(), Route: *route, Wait: *wait,
+		At: time.Now().UTC(), Route: *route, Wait: *wait, DedupKey: *dedupKey,
 	})
 	if err != nil {
 		return &exitError{exitUsage, err}
@@ -102,9 +103,15 @@ func runSend(args []string) error {
 
 	switch {
 	case out.Suppressed:
-		// Not an error -- the cap did its job -- but the caller must not be left
-		// believing the message went.
-		fmt.Fprintln(os.Stderr, "suppressed by the rate limit; it will be counted on the next message that gets through")
+		// Not an error -- a cap did its job -- but the caller must not be left
+		// believing the message went. Which cap matters: "rate" is the bot
+		// protecting the channel, "duplicate" is this exact alert already
+		// having been sent, and an operator reads those differently.
+		if out.SuppressedBy == "duplicate" {
+			fmt.Fprintln(os.Stderr, "suppressed as a duplicate of a recent message; it will be counted on the next one that gets through")
+		} else {
+			fmt.Fprintln(os.Stderr, "suppressed by the rate limit; it will be counted on the next message that gets through")
+		}
 	case *wait:
 		fmt.Printf("delivered to %d of %d\n", out.Delivered, out.Queued)
 	default:

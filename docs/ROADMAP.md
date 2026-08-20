@@ -110,21 +110,66 @@ message arrives in the operator's Freizone group with the bot as a member.
   either form -- which is to say it pinned nothing. Both corrected.
 
 ### BOT-02 — One-to-one routes
-Status: `planned`
+Status: `done` · Part of: BOT-01
 
-Peer destinations alongside the group route: address resolution cached at
-startup rather than per message, `StartConversation` on first contact, and one
-outbox entry per (message × destination) so a retry after a partial success
-cannot page the recipients who already have it. The outbox is designed for this
-in BOT-01, so this is an addition rather than a rework.
+Peer destinations alongside the group route: `StartConversation` on first
+contact, and one outbox entry per (message × destination) so a retry after a
+partial success cannot page the recipients who already have it.
+
+- 2026-08-20 — shipped inside BOT-01 rather than after it. Both routes were
+  needed at once because they are independent rather than alternatives -- with
+  both configured a message goes to both, which is the whole point: the team
+  channel *and* whoever is carrying the pager. Splitting them across two items
+  would have meant building the outbox twice.
+
+  One piece of this entry turned out not to be work: caching the peer's address
+  rather than resolving it per message is already `pkg/client`'s behaviour, since
+  `Endpoint` answers from the cached peer device before it resolves anything. So
+  there was nothing to add here, only something not to re-implement.
 
 ### BOT-03 — Message shaping
-Status: `planned`
+Status: `in progress`
 
 Deduplication keys, collapsing a storm into one line with a count, pairing a
 `resolved` notice with the `firing` one it answers, and severity deciding which
 route a message takes. This is what makes the bot usable during a real incident
 rather than during a demonstration.
+
+- 2026-08-20 — two of the three shipped: **severity routing** and
+  **deduplication**. Verified against a real server, with the recipient's own
+  transcript read back: three identical alerts thirty seconds apart arrived
+  once, an unrelated alert in between arrived, and the severity map sent
+  `critical` to the pager while refusing a `warning` mapped to a route that was
+  not configured.
+
+  Three rules that could each have gone the other way. **An unmapped severity
+  goes everywhere**, because silently dropping one is the worst possible
+  reading of a partial configuration. **An explicit `-route` beats the map**,
+  since a person typing it is doing something out of the ordinary on purpose
+  and configuration overriding that would make the flag a suggestion. And
+  **the body is not part of what makes two messages the same** -- it routinely
+  carries a timestamp or a load average that differs every time while the alert
+  plainly does not, so hashing it would make the feature do nothing in exactly
+  the cases it exists for.
+
+  Deduplication runs *before* the rate cap. They answer different questions --
+  "is this the same alert again" and "is too much leaving at once" -- and a
+  repeat the deduper would swallow should not spend a slot in the rate window
+  on its way to being dropped, or one flapping check exhausts the budget for
+  everything else.
+
+  Off by default, deliberately: deciding two alerts are one incident is a
+  judgement the monitoring system upstream usually makes better, having the
+  labels and the operator's own rules. This is for when it does not -- a shell
+  script, a cron job, a check with none of that.
+
+- **Open** — the third piece, pairing a `resolved` notice with the `firing` one
+  it answers. Held back because it is the first thing that would make this bot
+  hold state about *the world* rather than about its own recent output, and that
+  brings questions the other two did not: what an open alert means across a
+  restart, what to do with a `resolved` whose `firing` was never seen, and how
+  long an alert stays open before it is assumed over. Worth deciding before
+  building rather than discovering afterwards.
 
 ### BOT-04 — Standalone one-shot
 Status: `planned`
