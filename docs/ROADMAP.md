@@ -42,6 +42,32 @@ Acceptance: a `systemd OnFailure=` unit pipes into `freizone-bot send`, and the
 message arrives in the operator's Freizone group with the bot as a member.
 
 - 2026-08-17 — repo created, skeleton in place
+- 2026-08-20 — **the group route could not work, and had been documented as
+  though it did.** A group membership is not real until the invited account
+  sends `join_accept`, and nothing in this bot ever sent one -- so a configured
+  `FREIZONE_BOT_ROUTE_GROUP` left the bot invited for ever, sending into a group
+  it was not a member of. Found by Andreas asking whether the bot can be invited
+  to a group, which is the kind of question that only gets asked because the
+  README claims something. I had tested the peer route and let the documentation
+  stand in for verifying the other one.
+
+  Fixed, and verified with a real group over a real server: the founder's member
+  list goes from "invited, not accepted" to a full member, and a message from
+  the bot arrives in the group rendered as intended. An invitation to any *other*
+  group is left unanswered unless `FREIZONE_BOT_ACCEPT_GROUP_INVITES` says
+  otherwise -- accepting freely means anyone who knows the address decides what
+  this bot is a member of. Never declined either: declining is a signed fact
+  that says something, and the honest state is that nobody asked.
+
+  **A second gap of the same family came with it.** The command dispatch hung
+  off the live stream alone, so anything arriving while the bot was down was
+  stored and never answered -- and an invitation in that window never seen.
+  Both paths now go through one `onReceived`, which is the same discipline
+  SRV-30 applied to envelope handling, one layer up where the bot's own
+  follow-up lives. Worth noticing that this is the third time in this project
+  that a live path and a catch-up path drifted; it seems to be the default
+  outcome of having two, unless one function owns both.
+
 - 2026-08-20 — the receiving half works, verified against a real server: the
   daemon registers itself on first start, prints the one fact an operator must
   act on (its address, on stderr as well as in the log, plus `<state>/address`

@@ -219,3 +219,117 @@ func TestNonTextContentIsNotInterpreted(t *testing.T) {
 		t.Errorf("machinery must not be read as commands, saw %d", interp.seen())
 	}
 }
+
+// --- group invitations -----------------------------------------------------
+
+// joinRecorder stands in for the core's AcceptGroupInvitation, which needs a
+// real account and a server. What is under test is the *decision*, not the
+// protocol call -- the protocol call is pkg/client's and has its own tests.
+type joinRecorder struct {
+	mu     sync.Mutex
+	joined []string
+}
+
+func (j *joinRecorder) accept(_ context.Context, groupID string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.joined = append(j.joined, groupID)
+	return nil
+}
+
+func (j *joinRecorder) count() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.joined)
+}
+
+func invitation(groupID, from string) client.ReceiveResult {
+	return client.ReceiveResult{
+		PeerAccountID: from,
+		Content:       client.Content{Kind: client.ContentGroupControl},
+		Group:         &client.GroupOutcome{GroupID: groupID, Invited: true},
+	}
+}
+
+// A group membership is not real until the invited account says so. Nothing in
+// this bot ever said it before this item, which meant a configured group route
+// could not work at all: the bot sat invited for ever and its messages went to a
+// group it was not in.
+func TestAnInvitationToTheConfiguredGroupIsAccepted(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+
+	d.maybeJoinGroup(context.Background(), invitation("pgroup1", "qfounder"))
+
+	if rec.count() != 1 || rec.joined[0] != "pgroup1" {
+		t.Fatalf("the configured group should have been joined, got %+v", rec.joined)
+	}
+}
+
+// Anything else is a stranger deciding what this bot is a member of -- and from
+// then on it holds that group's facts and receives its traffic.
+func TestAnInvitationToAnotherGroupIsIgnored(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+
+	d.maybeJoinGroup(context.Background(), invitation("psomebodyelse", "qstranger"))
+
+	if rec.count() != 0 {
+		t.Errorf("an unconfigured group must not be joined, got %+v", rec.joined)
+	}
+}
+
+func TestWithTheOptInAnyInvitationIsAccepted(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	d.cfg.AcceptGroupInvites = true
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+
+	d.maybeJoinGroup(context.Background(), invitation("psomebodyelse", "qstranger"))
+
+	if rec.count() != 1 {
+		t.Errorf("with the opt-in it should have joined, got %+v", rec.joined)
+	}
+}
+
+// Ordinary group traffic is not an invitation, and re-joining on every message
+// would be a signed fact per message.
+func TestOnlyAnActualInvitationTriggersAJoin(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+
+	notAnInvite := invitation("pgroup1", "qfounder")
+	notAnInvite.Group.Invited = false
+	d.maybeJoinGroup(context.Background(), notAnInvite)
+
+	// And a one-to-one message carries no group at all.
+	d.maybeJoinGroup(context.Background(), textFrom("qalice"))
+
+	if rec.count() != 0 {
+		t.Errorf("nothing here was an invitation, got %+v", rec.joined)
+	}
+}
+
+// An invitation must be answered whether it came down the live stream or was
+// found in the queue on reconnect. It arrives while the bot is down at least as
+// often as while it is up.
+func TestAnInvitationFoundInTheQueueIsAlsoAnswered(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+
+	// onReceived is what both paths call.
+	d.onReceived(context.Background(), invitation("pgroup1", "qfounder"))
+
+	if rec.count() != 1 {
+		t.Errorf("a queued invitation must be answered too, got %+v", rec.joined)
+	}
+}
