@@ -31,7 +31,7 @@ func cfgWith(t *testing.T, group string, peers string) *config.Config {
 // a message goes to both, which is how escalation is expressed -- the team
 // channel *and* whoever is carrying the pager.
 func TestBothRoutesReceiveByDefault(t *testing.T) {
-	dests, err := Resolve(cfgWith(t, "qgroup", "qpeer1,qpeer2"), "", nil)
+	dests, err := Resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", "qlfxcdsa42x4xe4gwjcnu,qu0qmxckqmum0dv77pndv"), "", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestBothRoutesReceiveByDefault(t *testing.T) {
 }
 
 func TestOneRouteCanBeNamed(t *testing.T) {
-	cfg := cfgWith(t, "qgroup", "qpeer1,qpeer2")
+	cfg := cfgWith(t, "plfxcdsa42x4xe4zr2mju", "qlfxcdsa42x4xe4gwjcnu,qu0qmxckqmum0dv77pndv")
 
 	onlyGroup, err := Resolve(cfg, RouteGroup, nil)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestOneRouteCanBeNamed(t *testing.T) {
 // A typo in a route name has to be refused rather than quietly sending
 // everywhere, or nowhere.
 func TestAnUnknownRouteIsRefused(t *testing.T) {
-	_, err := Resolve(cfgWith(t, "qgroup", ""), "oncall", nil)
+	_, err := Resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", ""), "oncall", nil)
 	if err == nil {
 		t.Fatal("an unknown route must be refused")
 	}
@@ -78,7 +78,7 @@ func TestAnUnknownRouteIsRefused(t *testing.T) {
 // Naming a route that exists as a name but has nothing configured is its own
 // case: the operator asked for something specific and it is not set up.
 func TestANamedRouteWithNothingConfiguredIsRefused(t *testing.T) {
-	_, err := Resolve(cfgWith(t, "qgroup", ""), RoutePeers, nil)
+	_, err := Resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", ""), RoutePeers, nil)
 	if err == nil {
 		t.Fatal("asking for the peer route with no peers configured must be refused")
 	}

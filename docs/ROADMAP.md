@@ -172,6 +172,37 @@ partial success cannot page the recipients who already have it.
   `Endpoint` answers from the cached peer device before it resolves anything. So
   there was nothing to add here, only something not to re-implement.
 
+- 2026-08-20 — **a peer on another server could not be configured at all**, and
+  the README said it could. `Deliver` passed an empty server to
+  `StartConversation`, which means "mine", so every recipient was looked up on
+  the bot's own server. In a product whose premise is that servers federate,
+  the peer route reached one server only. Nothing failed loudly: an account that
+  lives elsewhere is simply not there, and the result reads like a deleted
+  account.
+
+  The cause was that **nothing in Go parses the `id*server` form**.
+  `pkg/address.Normalize` handles the id half -- separators, checksum -- and
+  knows nothing about a server; only freizone-app's Dart side ever split on the
+  star. So the composite address, which is the form a person actually copies out
+  of the app, existed in the protocol and in one client and nowhere else.
+
+  Fixed with `internal/config/address.go`: `ParsePeer` / `ParsePeers` /
+  `ParseGroupID`, and `outbound.Destination` carrying a `Server`. Parsing sits in
+  `config` rather than `outbound` so a bad recipient fails when the
+  configuration is read instead of at the first message -- the worst possible
+  moment to discover that a destination was never addressable. Four things are
+  refused there by name: a truncated id (strict, unlike `ResolvePeer`, which
+  completes a prefix because a person is typing), a group id in the peer route or
+  an account id in the group route (they differ by one character), a duplicate
+  recipient, and any single bad entry in the list.
+
+  **This is the fourth time in one session that documentation ran ahead of the
+  code**, after SRV-23's status, the group route, and the join catch-up. The
+  common thread is worth naming: each was a sentence written while designing
+  something, which then read as a description of what had been built. All four
+  were found by Andreas asking a question the docs had already answered
+  confidently -- which is not a review process.
+
 ### BOT-03 — Message shaping
 Status: `in progress`
 

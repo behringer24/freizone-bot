@@ -240,6 +240,16 @@ func (c *Config) validate() error {
 	if c.StateDir == "" {
 		return fmt.Errorf("%s must not be empty", envStateDir)
 	}
+	if _, err := ParseGroupID(c.RouteGroup); err != nil {
+		return fmt.Errorf("%s: %w", envRouteGroup, err)
+	}
+	if _, err := ParsePeers(c.RoutePeers); err != nil {
+		// Checked here so a typo in an environment file fails at startup rather
+		// than at the first message -- which is the worst possible moment to
+		// discover that a recipient was never addressable.
+		return fmt.Errorf("%s: %w", envRoutePeers, err)
+	}
+
 	// Deliberately not an error at load time: a bot with no route is a
 	// perfectly good thing to start once, to register and print its address,
 	// before the operator has invited it anywhere. The daemon refuses to run

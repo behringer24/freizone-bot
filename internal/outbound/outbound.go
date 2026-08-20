@@ -58,9 +58,20 @@ const (
 type Destination struct {
 	Kind Kind   `json:"kind"`
 	ID   string `json:"id"`
+
+	// Server is where a peer lives, empty for this bot own server. Carried on
+	// the destination because an outbox entry outlives the configuration that
+	// produced it: a message queued for a federated peer has to still know where
+	// that peer is after a restart.
+	Server string `json:"server,omitempty"`
 }
 
-func (d Destination) String() string { return string(d.Kind) + ":" + d.ID }
+func (d Destination) String() string {
+	if d.Server != "" {
+		return string(d.Kind) + ":" + d.ID + "*" + d.Server
+	}
+	return string(d.Kind) + ":" + d.ID
+}
 
 // Route names a configured set of destinations.
 const (
@@ -205,8 +216,12 @@ func Resolve(cfg *config.Config, route string, labels map[string]string) ([]Dest
 		out = append(out, Destination{Kind: KindGroup, ID: cfg.RouteGroup})
 	}
 	if wantPeers {
-		for _, peer := range cfg.RoutePeers {
-			out = append(out, Destination{Kind: KindPeer, ID: peer})
+		peers, err := config.ParsePeers(cfg.RoutePeers)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range peers {
+			out = append(out, Destination{Kind: KindPeer, ID: p.AccountID, Server: p.Server})
 		}
 	}
 	if len(out) == 0 {
@@ -248,7 +263,10 @@ func (s *coreSender) Deliver(ctx context.Context, d Destination, text string) er
 		// without it the send has no cached device and no session, and the core
 		// would have to invent both mid-send. Cheap and idempotent once the
 		// conversation exists.
-		if _, err := s.c.StartConversation(ctx, d.ID, ""); err != nil {
+		// The server is passed rather than left empty: empty means "our own", and
+		// a federated recipient resolved against the wrong server is a 404 that
+		// reads like a deleted account.
+		if _, err := s.c.StartConversation(ctx, d.ID, d.Server); err != nil {
 			return fmt.Errorf("reaching %s: %w", d.ID, err)
 		}
 		_, err := s.c.SendText(ctx, d.ID, text, client.SendOptions{})
