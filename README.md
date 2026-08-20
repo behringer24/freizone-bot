@@ -109,6 +109,25 @@ Exit codes, since this ends up inside shell scripts:
 
 `freizone-bot status` asks the running daemon for its address, whether it is connected, and how much is waiting.
 
+## Talking to it
+
+The bot can also answer. Set `FREIZONE_BOT_COMMANDERS` to the account ids allowed to command it, message it from one of them, and it replies in that chat:
+
+```
+/help    list what it can do
+/ping    check that it is listening
+/status  connected, queued, uptime
+/joke    the joke of the day
+```
+
+Everything shipped today only reads, and nothing runs a command on the host. There is deliberately no configuration that would let you add one: `ACTION_restart=systemctl restart nginx` is remote code execution for whoever gets a message past the allow-list.
+
+**With no commanders configured there is no command surface at all** — the bot will not answer anybody. That is fail-closed on purpose: not having decided who may drive your bot is not a decision that everyone may. A sender who is not on the list gets **silence**, not a refusal, because a refusal confirms to whoever asked that something is here and listening.
+
+Commands in groups are off unless you switch them on. In a one-to-one chat the leading `/` is optional; in a group it is required, so ordinary conversation is never read as an instruction.
+
+The interpretation of a message is deliberately a **replaceable layer**, and the authorization check runs *before* it. That ordering is the most important rule in this repository: today the interpreter is a parser and it looks academic, but the moment a model sits there (`BOT-10`), an interpreter that sees everything is one that anyone knowing this bot's address can write prompts for. The layer below it only ever executes actions that already exist, with parameters its own specification validated — a model can *name* an action, never invent one.
+
 ### With systemd
 
 Three lines, and every failing service on the host pages you:
@@ -152,6 +171,9 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_ROUTE_GROUP` | – | A group id messages are sent to. |
 | `FREIZONE_BOT_ROUTE_PEERS` | – | Comma-separated account ids or addresses messages are sent to individually. **Independent of the group route, not an alternative to it** — with both set, a message goes to both, which is how escalation is expressed: the team channel *and* whoever is carrying the pager. |
 | `FREIZONE_BOT_ROUTE_RULES` | – | Narrows where a message goes based on its **labels**, in order — the first matching rule decides. `severity:critical=group+peers,kind:digest=group` means a critical thing reaches the channel and the pager while a daily digest only goes to the channel. A message matching no rule goes everywhere configured, so a partial set never silently drops anything. An explicit `-route` wins over this. |
+| `FREIZONE_BOT_COMMANDERS` | – (off) | Comma-separated account ids that may command the bot. **Empty disables the command surface entirely** — the bot will not answer anybody. Deliberately not "whoever is in the group": group membership changes without you being told, a configured list changes when you change it. |
+| `FREIZONE_BOT_ALLOW_GROUP_COMMANDS` | `false` | Whether commands may be given in a group. Off by default: a command in a group is visible to everyone in it, its answer is too, and the membership drifts. With it off the bot takes instructions only in a one-to-one chat. |
+| `FREIZONE_BOT_JOKES_FILE` | – | One joke per line (`#` comments and blank lines ignored) for the `/joke` action, replacing the small built-in set. |
 | `FREIZONE_BOT_DEDUP_WINDOW_MINUTES` | `0` (off) | Collapses repeats of the same message within this many minutes: something that flaps every thirty seconds arrives once and then carries a count. Two messages are "the same" by title and labels — deliberately **not** the body, which routinely carries a timestamp or a measurement that differs every time while the thing being reported plainly does not. Pass `-dedup-key` to decide it yourself. Off by default because deciding two messages are one event is a judgement whatever produced them is usually better placed to make. |
 | `FREIZONE_BOT_MAX_AGE_MINUTES` | `60` | How long an undelivered message keeps being retried before it is dropped. An alert delivered six hours late is noise. The drop is logged at error level naming the message and its destination — a silent one would be a lie about a channel somebody is relying on. |
 | `FREIZONE_BOT_RATE_PER_MINUTE` | `20` | A hard ceiling on messages leaving per minute, with the excess collapsed into one "N further messages suppressed" line. Without it, one flapping service turns the bot into a denial of service on your own phone — and on your own server, whose per-device queue is bounded and starts refusing at 1000. |

@@ -39,6 +39,10 @@ const (
 
 	envDedupWindow = "FREIZONE_BOT_DEDUP_WINDOW_MINUTES"
 
+	envCommanders        = "FREIZONE_BOT_COMMANDERS"
+	envAllowGroupCommand = "FREIZONE_BOT_ALLOW_GROUP_COMMANDS"
+	envJokesFile         = "FREIZONE_BOT_JOKES_FILE"
+
 	envMaxAge    = "FREIZONE_BOT_MAX_AGE_MINUTES"
 	envRate      = "FREIZONE_BOT_RATE_PER_MINUTE"
 	envOutboxMax = "FREIZONE_BOT_OUTBOX_MAX"
@@ -129,6 +133,21 @@ type Config struct {
 	// to flap.
 	DedupWindow time.Duration
 
+	// Commanders may command the bot. Empty disables the command surface
+	// entirely -- fail closed, because an operator who has not thought about
+	// who may drive their bot has not decided that everyone may. Never learned
+	// from group membership, which drifts without anybody being told.
+	Commanders []string
+
+	// AllowGroupCommands lets commands be given in a group. Off by default: a
+	// command in a group is visible to everyone in it, its answer is too, and
+	// the membership changes without the operator.
+	AllowGroupCommands bool
+
+	// JokesFile replaces the built-in set for the joke action. Empty keeps the
+	// built-in one.
+	JokesFile string
+
 	MaxAge              time.Duration
 	RatePerMinute       int
 	OutboxMax           int
@@ -145,6 +164,16 @@ func Load(getenv func(string) string) (*Config, error) {
 		ControlGroup:  strings.TrimSpace(getenv(envControlGroup)),
 		RouteGroup:    strings.TrimSpace(getenv(envRouteGroup)),
 		RoutePeers:    splitList(getenv(envRoutePeers)),
+		Commanders:    splitList(getenv(envCommanders)),
+		JokesFile:     strings.TrimSpace(getenv(envJokesFile)),
+	}
+
+	if raw := strings.TrimSpace(getenv(envAllowGroupCommand)); raw != "" {
+		allow, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: invalid value %q (true or false): %w", envAllowGroupCommand, raw, err)
+		}
+		cfg.AllowGroupCommands = allow
 	}
 
 	level, err := parseLogLevel(orDefault(getenv(envLogLevel), "info"))
@@ -235,6 +264,11 @@ func (c *Config) AddressFile() string { return filepath.Join(c.StateDir, "addres
 func (c *Config) RoutesConfigured() bool {
 	return c.RouteGroup != "" || len(c.RoutePeers) > 0
 }
+
+// CommandsConfigured reports whether the bot will answer anybody. Same shape
+// again, and the same reason: an operator should be told that the command
+// surface is off rather than discovering it by asking the bot something.
+func (c *Config) CommandsConfigured() bool { return len(c.Commanders) > 0 }
 
 func loadInviteCode(getenv func(string) string) (string, error) {
 	inline := strings.TrimSpace(getenv(envInviteCode))

@@ -207,13 +207,49 @@ when the inbox is filling and top up prekeys on a timer, since neither happens
 without a daemon.
 
 ### BOT-05 — Command surface, deterministic
-Status: `planned`
+Status: `done`
 
 Incoming Freizone messages as commands: an allow-list of who may command the
 bot, a deterministic interpreter, an action registry, and a read-only action
-set (`help`, `status`, `ping`, `mute`). This is where the interpreter seam is
-built *and used* — by a parser, which is the only way to find out whether the
-seam is honest before an LLM depends on it.
+set. This is where the interpreter seam is built *and used* — by a parser,
+which is the only way to find out whether the seam is honest before an LLM
+depends on it.
+
+- 2026-08-20 — shipped: `internal/authz`, `internal/command`,
+  `internal/action`, and the dispatch in the daemon. Actions are `help`,
+  `ping`, `status` and `joke` — all read-only, none touching anything outside
+  the process. Verified against a real server: an allow-listed sender got all
+  four answers back in the chat they asked from, and an unlisted one got
+  complete silence with the attempt recorded at debug.
+
+  **The ordering is the point, and it now has a test.** Authorization runs
+  *before* interpretation, so a sender who may not command the bot has their
+  text never reach the interpreter at all -- not "reach it and be refused
+  afterwards". Today the interpreter is a parser and the difference is
+  invisible; the moment a model sits there, an interpreter that sees everything
+  is one that anyone knowing the address can write prompts for. That invariant
+  lived in `dispatch` with no test over it until this item, which was worth
+  fixing on its own: `cmd/bot` had no tests at all, and the single most
+  important rule in the repository was resting on a comment. Negative-controlled
+  by moving the check after the interpreter, which fails the test.
+
+  Fail-closed throughout: no commanders means no command surface, group
+  commands are off unless switched on, and an unlisted sender gets silence
+  rather than a refusal -- a refusal is an oracle confirming something is here
+  and listening, and an amplification vector besides.
+
+  The seam is honest rather than aspirational because the parser is built from
+  the same `action.Spec` values a model-driven interpreter would render as tool
+  definitions. If the parser had needed something they do not carry, tool
+  definitions would be missing it too, and that surfaces now rather than at
+  BOT-10. What the interpreter cannot reach is what makes it safe: it is handed
+  four strings and a clock, and returns a name and more strings. No client, no
+  registry, no configuration, no connection.
+
+  `/joke` is deliberately in the shipped set. It is the cheapest proof that
+  this command path carries something which is not an operations alert, and it
+  is a joke *of the day* rather than a random one because "of the day" is a
+  promise -- asking twice in an afternoon should not give two answers.
 
 ### BOT-06 — Spool fallback
 Status: `planned`
