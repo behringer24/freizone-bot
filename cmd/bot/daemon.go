@@ -26,6 +26,7 @@ import (
 	"github.com/behringer24/freizone-bot/internal/outbound"
 	"github.com/behringer24/freizone-bot/internal/outbox"
 	"github.com/behringer24/freizone-server/pkg/client"
+	"github.com/behringer24/freizone-server/pkg/group"
 )
 
 // version is what a `status` answer reports, so a CLI from a different build can
@@ -129,6 +130,7 @@ func runDaemon(args []string) error {
 		deduper:          outbound.NewDeduper(cfg.DedupWindow, time.Now),
 		started:          time.Now(),
 		acceptInvitation: c.AcceptGroupInvitation,
+		membershipOf:     c.GroupMembership,
 		id:               id,
 	}
 
@@ -161,6 +163,10 @@ func runDaemon(args []string) error {
 	})
 	ctrlErr := make(chan error, 1)
 	go func() { ctrlErr <- ctrl.Serve() }()
+
+	// Before the loops: an invitation may have been waiting on disk since a run
+	// that had no group configured, and nothing will announce it again.
+	d.joinConfiguredGroupIfInvited(ctx)
 
 	upkeepDone := runUpkeep(ctx, d, upkeepWanted)
 	streamDone := runStream(ctx, c, logger, upkeepWanted, d)
@@ -221,6 +227,10 @@ type daemon struct {
 	// and an account -- the protocol call itself is pkg/client's, and has its
 	// own tests there.
 	acceptInvitation func(ctx context.Context, groupID string) error
+
+	// membershipOf reads a group's resolved fact set, injectable for the same
+	// reason: what is worth testing is the catch-up decision, not the fold.
+	membershipOf func(groupID string) (*group.Resolved, error)
 
 	// The inbound half. Nil interpreter means no command surface is configured,
 	// which is the default -- see internal/authz on why that fails closed.
@@ -330,6 +340,59 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 func (d *daemon) onReceived(ctx context.Context, res client.ReceiveResult) {
 	d.maybeJoinGroup(ctx, res)
 	d.dispatch(ctx, res)
+}
+
+// joinConfiguredGroupIfInvited answers an invitation that is already sitting on
+// disk, at startup.
+//
+// This exists because an invitation is only *announced* once. The receive path
+// reports it when the facts are new to this device, and never again -- so an
+// invitation that arrived while the group was not configured is folded, ignored,
+// and never mentioned by anything afterwards. Configuring the group later and
+// restarting would do nothing at all.
+//
+// Which is exactly the order an operator is led into: the first run prints
+// "invite that address to the group it should post in", so of course the
+// invitation comes before anybody has looked up the group id. Reading the facts
+// we already hold, rather than waiting to be told again, is what makes the two
+// orders equivalent.
+func (d *daemon) joinConfiguredGroupIfInvited(ctx context.Context) {
+	if d.cfg.RouteGroup == "" {
+		return
+	}
+	membership, err := d.membershipOf(d.cfg.RouteGroup)
+	if err != nil {
+		d.logger.Warn("could not read the configured group's facts", "group", d.cfg.RouteGroup, "error", err)
+		return
+	}
+	if membership == nil {
+		// No facts for it yet -- either nobody has invited the bot, or the
+		// invitation has not arrived. Both are ordinary, and the live path
+		// handles the invitation when it comes.
+		return
+	}
+
+	me := d.id.AccountID
+	for _, m := range membership.Members {
+		if m.AccountID != me {
+			continue
+		}
+		if m.Joined {
+			return // already a member; nothing to do
+		}
+		d.logger.Info("finishing an invitation that was waiting on disk", "group", d.cfg.RouteGroup)
+		if err := d.acceptInvitation(ctx, d.cfg.RouteGroup); err != nil {
+			d.logger.Error("could not accept the waiting invitation",
+				"group", d.cfg.RouteGroup, "error", err)
+			return
+		}
+		d.logger.Info("joined a group", "group", d.cfg.RouteGroup)
+		return
+	}
+	// Facts held, but this bot is not in the member list: it was removed, or it
+	// only ever received a snapshot of somebody else's group. Nothing to accept.
+	d.logger.Info("the configured group's facts do not list this bot as a member",
+		"group", d.cfg.RouteGroup)
 }
 
 // maybeJoinGroup answers an invitation, when it is one the operator asked for.

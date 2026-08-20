@@ -13,6 +13,7 @@ import (
 	"github.com/behringer24/freizone-bot/internal/config"
 	"github.com/behringer24/freizone-bot/internal/outbound"
 	"github.com/behringer24/freizone-server/pkg/client"
+	"github.com/behringer24/freizone-server/pkg/group"
 )
 
 // recordingInterpreter answers nothing and remembers whether it was asked.
@@ -331,5 +332,88 @@ func TestAnInvitationFoundInTheQueueIsAlsoAnswered(t *testing.T) {
 
 	if rec.count() != 1 {
 		t.Errorf("a queued invitation must be answered too, got %+v", rec.joined)
+	}
+}
+
+// An invitation is announced exactly once -- when the facts are new to this
+// device. So one that arrived while the group was not configured is folded,
+// ignored, and never mentioned again: configuring the group later and
+// restarting would do nothing at all.
+//
+// Which is precisely the order the first run leads an operator into, since it
+// prints "invite that address to the group it should post in" before anybody
+// has looked up a group id. Reading the facts already held is what makes both
+// orders work.
+func TestAnInvitationWaitingOnDiskIsFinishedAtStartup(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	d.id = client.Identity{AccountID: "qbot"}
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+	d.membershipOf = func(string) (*group.Resolved, error) {
+		return &group.Resolved{Members: []group.Member{
+			{AccountID: "qfounder", Joined: true},
+			{AccountID: "qbot", Joined: false}, // invited, never accepted
+		}}, nil
+	}
+
+	d.joinConfiguredGroupIfInvited(context.Background())
+
+	if rec.count() != 1 {
+		t.Fatalf("a waiting invitation must be finished at startup, got %+v", rec.joined)
+	}
+}
+
+// Already a member: nothing to accept, and re-accepting would be a signed fact
+// on every single start.
+func TestAStartupWithMembershipAlreadyHeldJoinsNothing(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	d.id = client.Identity{AccountID: "qbot"}
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+	d.membershipOf = func(string) (*group.Resolved, error) {
+		return &group.Resolved{Members: []group.Member{{AccountID: "qbot", Joined: true}}}, nil
+	}
+
+	d.joinConfiguredGroupIfInvited(context.Background())
+
+	if rec.count() != 0 {
+		t.Errorf("nothing to do when already a member, got %+v", rec.joined)
+	}
+}
+
+// No facts for the configured group is the ordinary case on a first run: nobody
+// has invited the bot yet, and the live path will handle it when they do.
+func TestAStartupWithNoFactsForTheGroupIsQuiet(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+	d.membershipOf = func(string) (*group.Resolved, error) { return nil, nil }
+
+	d.joinConfiguredGroupIfInvited(context.Background())
+
+	if rec.count() != 0 {
+		t.Errorf("nothing to accept without facts, got %+v", rec.joined)
+	}
+}
+
+// Holding a group's facts without being in its member list happens after a
+// removal. Re-accepting would be the bot letting itself back in.
+func TestAStartupAfterBeingRemovedDoesNotRejoin(t *testing.T) {
+	d, _, _ := testDaemon(t, nil, false)
+	d.cfg.RouteGroup = "pgroup1"
+	d.id = client.Identity{AccountID: "qbot"}
+	rec := &joinRecorder{}
+	d.acceptInvitation = rec.accept
+	d.membershipOf = func(string) (*group.Resolved, error) {
+		return &group.Resolved{Members: []group.Member{{AccountID: "qfounder", Joined: true}}}, nil
+	}
+
+	d.joinConfiguredGroupIfInvited(context.Background())
+
+	if rec.count() != 0 {
+		t.Errorf("a removed bot must not let itself back in, got %+v", rec.joined)
 	}
 }
