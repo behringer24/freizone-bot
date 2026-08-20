@@ -33,9 +33,9 @@ const (
 	envControlSocket = "FREIZONE_BOT_CONTROL_SOCKET"
 	envControlGroup  = "FREIZONE_BOT_CONTROL_GROUP"
 
-	envRouteGroup     = "FREIZONE_BOT_ROUTE_GROUP"
-	envRoutePeers     = "FREIZONE_BOT_ROUTE_PEERS"
-	envSeverityRoutes = "FREIZONE_BOT_SEVERITY_ROUTES"
+	envRouteGroup = "FREIZONE_BOT_ROUTE_GROUP"
+	envRoutePeers = "FREIZONE_BOT_ROUTE_PEERS"
+	envRouteRules = "FREIZONE_BOT_ROUTE_RULES"
 
 	envDedupWindow = "FREIZONE_BOT_DEDUP_WINDOW_MINUTES"
 
@@ -112,15 +112,15 @@ type Config struct {
 	RouteGroup string
 	RoutePeers []string
 
-	// SeverityRoutes narrows where a given severity goes, e.g. everything to
-	// the group but only `critical` to the pager as well. A severity with no
-	// entry -- and every message when this is unset -- goes everywhere that is
-	// configured, which is the behaviour without it.
+	// RouteRules narrow where a message goes based on its labels, in order --
+	// the first rule whose label matches decides. A message matching nothing,
+	// and every message when this is empty, goes everywhere configured.
 	//
-	// Deliberately not a fixed set of severities: they are free-form, because
-	// whatever monitoring system is upstream already has its own vocabulary and
-	// making it match one invented here would be work for nobody's benefit.
-	SeverityRoutes map[string][]string
+	// On labels rather than on a severity field, because severity is only one
+	// thing a message might be routed by: `kind=digest` to the group,
+	// `severity=critical` to the pager, `repo=freizone-app` somewhere else
+	// again. Hard-coding one of them would have made this an alerting tool.
+	RouteRules []RouteRule
 
 	// DedupWindow collapses repeats of the same message. Zero is off, which is
 	// the default: the bot is a delivery path first, and deciding that two
@@ -183,7 +183,7 @@ func Load(getenv func(string) string) (*Config, error) {
 	}
 	cfg.DedupWindow = time.Duration(dedupMinutes) * time.Minute
 
-	if cfg.SeverityRoutes, err = parseSeverityRoutes(getenv(envSeverityRoutes)); err != nil {
+	if cfg.RouteRules, err = parseRouteRules(getenv(envRouteRules)); err != nil {
 		return nil, err
 	}
 
@@ -253,36 +253,64 @@ func loadInviteCode(getenv func(string) string) (string, error) {
 	return strings.TrimSpace(string(raw)), nil
 }
 
-// KnownRoutes are the route names a severity mapping may refer to. Kept here so
-// config can reject a typo at load time rather than at the first message that
-// uses it -- an alerting tool discovering its own misconfiguration during an
-// incident is the wrong moment.
+// KnownRoutes are the route names a rule may refer to. Kept here so config can
+// reject a typo at load time rather than at the first message that uses it --
+// discovering a misconfiguration during an incident is the wrong moment.
 var KnownRoutes = []string{"group", "peers"}
 
-// parseSeverityRoutes reads `critical=group+peers,warning=group`.
+// RouteRule sends messages carrying one label value to a particular set of
+// routes.
+type RouteRule struct {
+	Label  string
+	Value  string
+	Routes []string
+}
+
+// MatchRoute returns the first rule whose label matches, or nil.
 //
-// Two separators rather than one because the two levels mean different things: a
-// comma separates severities, a plus joins routes for one severity. Using commas
-// for both would make `critical=group,peers` ambiguous with a second severity
-// named "peers".
-func parseSeverityRoutes(raw string) (map[string][]string, error) {
+// First match rather than most specific: the order in the configuration is the
+// operator's own statement of precedence, and inferring specificity from a set
+// of equally-shaped rules would mean guessing at it.
+func (c *Config) MatchRoute(labels map[string]string) *RouteRule {
+	for i := range c.RouteRules {
+		r := &c.RouteRules[i]
+		if v, ok := labels[r.Label]; ok && strings.EqualFold(strings.TrimSpace(v), r.Value) {
+			return r
+		}
+	}
+	return nil
+}
+
+// parseRouteRules reads `severity:critical=group+peers,kind:digest=group`.
+//
+// Three separators, each for a different job: a colon between a label and its
+// value, an equals before the routes, a plus joining routes, and a comma
+// between rules. It looks like a lot until you try it with fewer -- using
+// commas for both the rules and the routes would make
+// `severity:critical=group,peers` ambiguous with a second rule.
+func parseRouteRules(raw string) ([]RouteRule, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
 	}
-	out := map[string][]string{}
-	for _, pair := range strings.Split(raw, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
+	var out []RouteRule
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
 			continue // a trailing comma is not a configuration error
 		}
-		severity, routes, ok := strings.Cut(pair, "=")
+		match, routes, ok := strings.Cut(entry, "=")
 		if !ok {
-			return nil, fmt.Errorf("%s: %q is not severity=route (e.g. critical=group+peers)", envSeverityRoutes, pair)
+			return nil, fmt.Errorf("%s: %q is not label:value=route (e.g. severity:critical=group+peers)", envRouteRules, entry)
 		}
-		severity = strings.ToLower(strings.TrimSpace(severity))
-		if severity == "" {
-			return nil, fmt.Errorf("%s: %q names no severity", envSeverityRoutes, pair)
+		label, value, ok := strings.Cut(match, ":")
+		if !ok {
+			return nil, fmt.Errorf("%s: %q is missing the label (e.g. severity:critical=group)", envRouteRules, entry)
+		}
+		label = strings.TrimSpace(label)
+		value = strings.TrimSpace(value)
+		if label == "" || value == "" {
+			return nil, fmt.Errorf("%s: %q names no label or no value", envRouteRules, entry)
 		}
 
 		var names []string
@@ -292,15 +320,15 @@ func parseSeverityRoutes(raw string) (map[string][]string, error) {
 				continue
 			}
 			if !slices.Contains(KnownRoutes, r) {
-				return nil, fmt.Errorf("%s: unknown route %q for severity %q (known: %s)",
-					envSeverityRoutes, r, severity, strings.Join(KnownRoutes, ", "))
+				return nil, fmt.Errorf("%s: unknown route %q in %q (known: %s)",
+					envRouteRules, r, entry, strings.Join(KnownRoutes, ", "))
 			}
 			names = append(names, r)
 		}
 		if len(names) == 0 {
-			return nil, fmt.Errorf("%s: severity %q is mapped to no route", envSeverityRoutes, severity)
+			return nil, fmt.Errorf("%s: %q is mapped to no route", envRouteRules, entry)
 		}
-		out[severity] = names
+		out = append(out, RouteRule{Label: label, Value: value, Routes: names})
 	}
 	return out, nil
 }

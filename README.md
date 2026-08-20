@@ -59,11 +59,38 @@ A daemon with no route refuses to start rather than warning: one that accepts me
 
 The daemon owns the account, so the CLI does not open it — it hands the message to the running daemon over a local socket. Same binary, which is also why `docker exec <container> /freizone-bot send …` works with no shell in the image.
 
+A message is a title, a body and **labels**. Nothing more is built in — an operations alert, a build result, a scheduled digest and a one-liner are the same shape with different labels:
+
 ```sh
-freizone-bot send "disk full on web01"
-freizone-bot send -severity critical -title "disk full on web01" -source web01 "/ at 98%"
+freizone-bot send "Why do programmers prefer dark mode? Light attracts bugs."
+
+freizone-bot send -title "build failed" \
+  -label repo=freizone-app -label branch=master -label kind=ci "3 tests red"
+
+freizone-bot send -severity critical -source web01 -title "disk full" "/ at 98%"
+
 journalctl -u nginx -n 20 | freizone-bot send -title "nginx is down on web01"
 ```
+
+Those three arrive as:
+
+```
+Why do programmers prefer dark mode? Light attracts bugs.
+```
+```
+build failed
+
+3 tests red
+
+branch=master kind=ci repo=freizone-app
+```
+```
+[CRITICAL] disk full (web01)
+
+/ at 98%
+```
+
+`severity` and `source` are **conventions, not a schema**: the renderer gives them prominence because that is what people put there, `-severity` and `-source` are shorthands for `-label`, and everything works with neither present. Labels also drive routing (`FREIZONE_BOT_ROUTE_RULES`) and deduplication, so `kind=digest` can go somewhere different from `severity=critical` without either being special to the code.
 
 Text comes from an argument, or from standard input when no argument is given — **never both**. That is not a style choice: reading standard input whenever it is not a terminal hangs forever under a service manager or a CI runner, where it is routinely an open pipe nobody ever closes. An alerting tool that blocks at the moment it is needed is the worst failure available to it.
 
@@ -124,8 +151,8 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_CONTROL_GROUP` | – | A group that owns the socket's parent directory, so members of it may talk to the daemon. Unset leaves the directory to the daemon's own user alone. |
 | `FREIZONE_BOT_ROUTE_GROUP` | – | A group id messages are sent to. |
 | `FREIZONE_BOT_ROUTE_PEERS` | – | Comma-separated account ids or addresses messages are sent to individually. **Independent of the group route, not an alternative to it** — with both set, a message goes to both, which is how escalation is expressed: the team channel *and* whoever is carrying the pager. |
-| `FREIZONE_BOT_SEVERITY_ROUTES` | – | Narrows where a given severity goes, e.g. `critical=group+peers,warning=group` — everything in the team channel, only the serious thing on the pager. A severity with no entry goes everywhere configured, so a partial mapping never silently drops anything. Severities are free-form: whatever your monitoring system already calls them. An explicit `-route` on the command line wins over this. |
-| `FREIZONE_BOT_DEDUP_WINDOW_MINUTES` | `0` (off) | Collapses repeats of the same message within this many minutes: a check that flaps every thirty seconds pages once and then carries a count, instead of paging every thirty seconds. Two messages are "the same" by severity, title and source — deliberately **not** the body, which routinely carries a timestamp or a load average that differs every time while the alert plainly does not. Pass `-dedup-key` to decide it yourself. Off by default because deciding two alerts are the same incident is a judgement your monitoring system is usually better placed to make. |
+| `FREIZONE_BOT_ROUTE_RULES` | – | Narrows where a message goes based on its **labels**, in order — the first matching rule decides. `severity:critical=group+peers,kind:digest=group` means a critical thing reaches the channel and the pager while a daily digest only goes to the channel. A message matching no rule goes everywhere configured, so a partial set never silently drops anything. An explicit `-route` wins over this. |
+| `FREIZONE_BOT_DEDUP_WINDOW_MINUTES` | `0` (off) | Collapses repeats of the same message within this many minutes: something that flaps every thirty seconds arrives once and then carries a count. Two messages are "the same" by title and labels — deliberately **not** the body, which routinely carries a timestamp or a measurement that differs every time while the thing being reported plainly does not. Pass `-dedup-key` to decide it yourself. Off by default because deciding two messages are one event is a judgement whatever produced them is usually better placed to make. |
 | `FREIZONE_BOT_MAX_AGE_MINUTES` | `60` | How long an undelivered message keeps being retried before it is dropped. An alert delivered six hours late is noise. The drop is logged at error level naming the message and its destination — a silent one would be a lie about a channel somebody is relying on. |
 | `FREIZONE_BOT_RATE_PER_MINUTE` | `20` | A hard ceiling on messages leaving per minute, with the excess collapsed into one "N further messages suppressed" line. Without it, one flapping service turns the bot into a denial of service on your own phone — and on your own server, whose per-device queue is bounded and starts refusing at 1000. |
 | `FREIZONE_BOT_OUTBOX_MAX` | `1000` | How many accepted-but-undelivered messages the outbox holds. Beyond it, `send` is refused with a non-zero exit rather than silently dropping: a loud rejection leaves the caller able to do something about it. |

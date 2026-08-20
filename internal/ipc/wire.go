@@ -88,14 +88,15 @@ func (e *Error) Error() string { return e.Message }
 // the line that says what happened, and the detail underneath it. Either may be
 // empty, but not both.
 type SendRequest struct {
-	Title    string `json:"title,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Severity string `json:"severity,omitempty"`
+	Title string `json:"title,omitempty"`
+	Text  string `json:"text,omitempty"`
 
-	// Source is where this came from -- a hostname, a unit name, a job. Carried
-	// separately from the text so a later routing rule can read it without
-	// parsing prose.
-	Source string `json:"source,omitempty"`
+	// Labels describe the message, for routing, deduplication and display.
+	// Free-form: `severity` and `source` are conventions the renderer gives
+	// prominence to, not a schema. Anything else -- `kind=digest`,
+	// `repo=freizone-app`, `device=sensor-3` -- is equally at home here, which
+	// is the point of not having made them fields.
+	Labels map[string]string `json:"labels,omitempty"`
 
 	// At is when the thing being reported happened, which is not necessarily
 	// when it is delivered. A message that waited out a retry says so rather
@@ -106,10 +107,10 @@ type SendRequest struct {
 	// mapping decides, and failing that every route that is configured.
 	Route string `json:"route,omitempty"`
 
-	// DedupKey says which messages count as the same incident, for the
-	// deduplication window. Only the caller knows that: two alerts with
+	// DedupKey says which messages count as the same event, for the
+	// deduplication window. Only the caller knows that: two messages with
 	// identical text can be separate events, and two with different text can be
-	// one. Empty falls back to severity, title and source.
+	// one. Empty falls back to the title and the labels.
 	DedupKey string `json:"dedup_key,omitempty"`
 
 	// Wait asks the daemon to answer only once the message has been delivered

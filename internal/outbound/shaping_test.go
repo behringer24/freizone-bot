@@ -18,7 +18,7 @@ func cfgRouted(t *testing.T, severityRoutes string) *config.Config {
 			return "qgroup"
 		case "FREIZONE_BOT_ROUTE_PEERS":
 			return "qpeer1,qpeer2"
-		case "FREIZONE_BOT_SEVERITY_ROUTES":
+		case "FREIZONE_BOT_ROUTE_RULES":
 			return severityRoutes
 		}
 		return ""
@@ -32,9 +32,9 @@ func cfgRouted(t *testing.T, severityRoutes string) *config.Config {
 // The escalation case this exists for: everything lands in the team channel,
 // and only the serious thing also wakes whoever is carrying the pager.
 func TestSeverityDecidesWhoIsWoken(t *testing.T) {
-	cfg := cfgRouted(t, "critical=group+peers,warning=group")
+	cfg := cfgRouted(t, "severity:critical=group+peers,severity:warning=group")
 
-	critical, err := Resolve(cfg, "", "critical")
+	critical, err := Resolve(cfg, "", sev("critical"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestSeverityDecidesWhoIsWoken(t *testing.T) {
 		t.Errorf("critical should reach the group and both peers, got %+v", critical)
 	}
 
-	warning, err := Resolve(cfg, "", "warning")
+	warning, err := Resolve(cfg, "", sev("warning"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestSeverityDecidesWhoIsWoken(t *testing.T) {
 // mapping at all. Silently dropping an unmapped severity would be the worst
 // possible reading of a partial configuration.
 func TestAnUnmappedSeverityStillGoesEverywhere(t *testing.T) {
-	dests, err := Resolve(cfgRouted(t, "critical=peers"), "", "notice")
+	dests, err := Resolve(cfgRouted(t, "severity:critical=peers"), "", sev("notice"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestAnUnmappedSeverityStillGoesEverywhere(t *testing.T) {
 
 // Case should not decide whether somebody gets woken up.
 func TestSeverityMatchingIgnoresCase(t *testing.T) {
-	dests, err := Resolve(cfgRouted(t, "critical=peers"), "", "CRITICAL")
+	dests, err := Resolve(cfgRouted(t, "severity:critical=peers"), "", sev("CRITICAL"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSeverityMatchingIgnoresCase(t *testing.T) {
 // out of the ordinary on purpose, and configuration overriding that would make
 // the flag a suggestion.
 func TestAnExplicitRouteOverridesTheMapping(t *testing.T) {
-	dests, err := Resolve(cfgRouted(t, "critical=group"), RoutePeers, "critical")
+	dests, err := Resolve(cfgRouted(t, "severity:critical=group"), RoutePeers, sev("critical"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -97,8 +97,8 @@ func TestAMappingToAnUnconfiguredRouteSaysWhichToFix(t *testing.T) {
 			return "https://chat.example.org"
 		case "FREIZONE_BOT_ROUTE_GROUP":
 			return "qgroup" // no peers configured
-		case "FREIZONE_BOT_SEVERITY_ROUTES":
-			return "critical=peers"
+		case "FREIZONE_BOT_ROUTE_RULES":
+			return "severity:critical=peers"
 		}
 		return ""
 	})
@@ -106,11 +106,11 @@ func TestAMappingToAnUnconfiguredRouteSaysWhichToFix(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 
-	_, err = Resolve(cfg, "", "critical")
+	_, err = Resolve(cfg, "", sev("critical"))
 	if err == nil {
 		t.Fatal("a severity routed nowhere reachable must be refused")
 	}
-	if !strings.Contains(err.Error(), "SEVERITY_ROUTES") {
+	if !strings.Contains(err.Error(), "ROUTE_RULES") {
 		t.Errorf("the error should name the setting to check, got %q", err)
 	}
 }
@@ -122,7 +122,7 @@ func TestABadSeverityMappingIsRefusedAtLoad(t *testing.T) {
 			switch k {
 			case "FREIZONE_BOT_SERVER":
 				return "https://chat.example.org"
-			case "FREIZONE_BOT_SEVERITY_ROUTES":
+			case "FREIZONE_BOT_ROUTE_RULES":
 				return raw
 			}
 			return ""
@@ -153,7 +153,7 @@ func TestDedupIsOffByDefault(t *testing.T) {
 func TestARepeatInsideTheWindowIsSuppressed(t *testing.T) {
 	now := time.Now()
 	d := NewDeduper(5*time.Minute, func() time.Time { return now })
-	m := Message{Severity: "warning", Title: "nginx flapping", Source: "web01"}
+	m := Message{Title: "nginx flapping", Labels: map[string]string{LabelSeverity: "warning", LabelSource: "web01"}}
 
 	if ok, _ := d.Allow(m, ""); !ok {
 		t.Fatal("the first one has to go")
@@ -190,7 +190,7 @@ func TestTheBodyDoesNotMakeAMessageDifferent(t *testing.T) {
 	now := time.Now()
 	d := NewDeduper(time.Minute, func() time.Time { return now })
 
-	first := Message{Severity: "warning", Title: "load high", Source: "web01", Text: "load 8.1"}
+	first := Message{Title: "load high", Text: "load 8.1", Labels: map[string]string{LabelSeverity: "warning", LabelSource: "web01"}}
 	second := first
 	second.Text = "load 8.4"
 
@@ -274,5 +274,86 @@ func TestQuietKeysAreForgottenButOwedCountsAreNot(t *testing.T) {
 	// with no note.
 	if ok, note := d.Allow(Message{Title: "quiet"}, ""); !ok || note != "" {
 		t.Errorf("a forgotten key should look new, got ok=%t note=%q", ok, note)
+	}
+}
+
+// sev is the labels a message with only a severity carries -- the common shape
+// in these tests, and short enough to be worth a helper.
+func sev(s string) map[string]string { return map[string]string{LabelSeverity: s} }
+
+// The point of labels rather than fields: routing on something that has nothing
+// to do with alerting. If this needed a severity, the bot would still be an
+// alerting tool wearing a general-purpose name.
+func TestRoutingWorksOnAnyLabel(t *testing.T) {
+	cfg := cfgRouted(t, "kind:digest=group,repo:freizone-app=peers")
+
+	digest, err := Resolve(cfg, "", map[string]string{"kind": "digest"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(digest) != 1 || digest[0].Kind != KindGroup {
+		t.Errorf("a daily digest belongs in the group, got %+v", digest)
+	}
+
+	build, err := Resolve(cfg, "", map[string]string{"repo": "freizone-app"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(build) != 2 || build[0].Kind != KindPeer {
+		t.Errorf("a build result for that repo goes to the peers, got %+v", build)
+	}
+}
+
+// The first matching rule decides, in the order the operator wrote them: that
+// order is their own statement of precedence, and inferring specificity from a
+// set of equally-shaped rules would mean guessing at it.
+func TestTheFirstMatchingRuleWins(t *testing.T) {
+	cfg := cfgRouted(t, "kind:digest=group,severity:critical=peers")
+
+	// Carries both labels; the digest rule comes first.
+	dests, err := Resolve(cfg, "", map[string]string{"kind": "digest", "severity": "critical"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(dests) != 1 || dests[0].Kind != KindGroup {
+		t.Errorf("the earlier rule should decide, got %+v", dests)
+	}
+}
+
+// A message that is not an alert at all -- a joke, an answer to a command, a
+// digest -- renders as plain text with nothing bolted on. The alerting
+// decoration is entirely a consequence of labels being present.
+func TestAMessageWithNoLabelsIsJustText(t *testing.T) {
+	now := time.Now().UTC()
+	got := Message{Text: "Why do programmers prefer dark mode? Because light attracts bugs.", At: now}.Render(now)
+
+	if got != "Why do programmers prefer dark mode? Because light attracts bugs." {
+		t.Errorf("a plain message must not grow decoration, got %q", got)
+	}
+	for _, unwanted := range []string{"[", "(", "="} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("unexpected %q in a message with no labels: %q", unwanted, got)
+		}
+	}
+}
+
+// Labels that are not the two conventional ones are still shown, sorted -- so
+// the same message reads the same way twice, where Go's map order would
+// reshuffle them on every send.
+func TestOtherLabelsAreListedInAStableOrder(t *testing.T) {
+	now := time.Now().UTC()
+	m := Message{
+		Title:  "build failed",
+		Labels: map[string]string{"repo": "freizone-app", "branch": "master", "kind": "ci"},
+		At:     now,
+	}
+	first := m.Render(now)
+	if !strings.Contains(first, "branch=master kind=ci repo=freizone-app") {
+		t.Errorf("labels should be listed sorted, got %q", first)
+	}
+	for range 5 {
+		if again := m.Render(now); again != first {
+			t.Fatalf("the same message rendered differently:\n%q\n%q", first, again)
+		}
 	}
 }

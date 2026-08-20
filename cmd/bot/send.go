@@ -7,12 +7,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/behringer24/freizone-bot/internal/config"
 	"github.com/behringer24/freizone-bot/internal/ipc"
+	"github.com/behringer24/freizone-bot/internal/outbound"
 )
 
 // Exit codes, because this ends up inside shell scripts and a script can only
@@ -24,6 +27,40 @@ const (
 	exitNoDaemon   = 4
 	exitTimeoutErr = 5
 )
+
+// labelFlag collects repeated -label key=value pairs.
+//
+// A flag.Value rather than one comma-separated string, because a label value is
+// arbitrary text: a comma inside one would otherwise split it, and escaping
+// rules for that are a worse cost than typing the flag twice.
+type labelFlag map[string]string
+
+func (l labelFlag) String() string {
+	if len(l) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(l))
+	for _, k := range slices.Sorted(maps.Keys(l)) {
+		parts = append(parts, k+"="+l[k])
+	}
+	return strings.Join(parts, " ")
+}
+
+func (l *labelFlag) Set(v string) error {
+	key, value, ok := strings.Cut(v, "=")
+	if !ok {
+		return fmt.Errorf("a label is key=value, got %q", v)
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return fmt.Errorf("a label needs a name, got %q", v)
+	}
+	if *l == nil {
+		*l = labelFlag{}
+	}
+	(*l)[key] = strings.TrimSpace(value)
+	return nil
+}
 
 // exitError carries a code out of runSend, so main can keep its one error path.
 type exitError struct {
@@ -37,10 +74,12 @@ func (e *exitError) Unwrap() error { return e.err }
 func runSend(args []string) error {
 	fs := flag.NewFlagSet("send", flag.ExitOnError)
 	title := fs.String("title", "", "the headline: what happened, in one line")
-	severity := fs.String("severity", "", "free-form severity, shown in front of the title (e.g. info, warning, critical)")
-	source := fs.String("source", "", "where this came from -- a host, a unit, a job")
-	route := fs.String("route", "", "send only to one configured route (\"group\" or \"peers\"); default lets the severity mapping decide, and failing that every configured route")
-	dedupKey := fs.String("dedup-key", "", "which incident this is, for the deduplication window; default is severity+title+source")
+	var labels labelFlag
+	fs.Var(&labels, "label", "a key=value label, repeatable (used for routing, deduplication and display)")
+	severity := fs.String("severity", "", "shorthand for -label severity=... , shown in front of the title (e.g. info, warning, critical)")
+	source := fs.String("source", "", "shorthand for -label source=... , shown next to the title -- a host, a unit, a job")
+	route := fs.String("route", "", "send only to one configured route (\"group\" or \"peers\"); default lets the routing rules decide, and failing that every configured route")
+	dedupKey := fs.String("dedup-key", "", "which event this is, for the deduplication window; default is the title and the labels")
 	wait := fs.Bool("wait", false, "wait for delivery instead of returning once the message is durably queued")
 	timeout := fs.Duration("timeout", 10*time.Second, "how long to wait for the daemon")
 	fs.Parse(args) //nolint:errcheck // ExitOnError
@@ -58,8 +97,23 @@ func runSend(args []string) error {
 		return &exitError{exitUsage, fmt.Errorf("loading configuration: %w", err)}
 	}
 
+	// The two shorthands are folded in here rather than being carried
+	// separately, so that everything downstream sees only labels -- and an
+	// explicit -label wins, since somebody spelling it out that way meant it.
+	all := map[string]string{}
+	if *severity != "" {
+		all[outbound.LabelSeverity] = *severity
+	}
+	if *source != "" {
+		all[outbound.LabelSource] = *source
+	}
+	maps.Copy(all, labels)
+	if len(all) == 0 {
+		all = nil
+	}
+
 	body, err := json.Marshal(ipc.SendRequest{
-		Title: *title, Text: text, Severity: *severity, Source: *source,
+		Title: *title, Text: text, Labels: all,
 		At: time.Now().UTC(), Route: *route, Wait: *wait, DedupKey: *dedupKey,
 	})
 	if err != nil {
