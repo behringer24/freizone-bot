@@ -84,9 +84,14 @@ func ParsePeer(raw string) (Peer, error) {
 	if !hasServer {
 		return Peer{AccountID: normalised}, nil
 	}
+	// `*local`, and a bare trailing `*`, both mean "whatever server this is
+	// resolved against" -- the format says so, and treating them as equivalent
+	// to no star at all is why a parser can always split on the first star
+	// rather than special-casing the absence of one. Read literally instead,
+	// `*local` becomes the host `https://local` and quietly routes nowhere.
 	server = strings.TrimSpace(server)
-	if server == "" {
-		return Peer{}, fmt.Errorf("%q names no server after the *", raw)
+	if server == "" || strings.EqualFold(server, "local") {
+		return Peer{AccountID: normalised}, nil
 	}
 	if !strings.Contains(server, "://") {
 		server = "https://" + server

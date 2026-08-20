@@ -200,6 +200,7 @@ actually has in front of them:
 | `qlfxc-dsa42-x4xe4-gwjcnu` | The same account, in the hyphenated form the app displays |
 | `qlfxcdsa42x4xe4gwjcnu*chat.example.org` | An account on **another** server, reached over `https://` |
 | `qlfxcdsa42x4xe4gwjcnu*http://box.lan:18081` | The same, over a scheme you spelled out yourself |
+| `qlfxcdsa42x4xe4gwjcnu*local` | The bot's own server again — what the address format calls the local form, and equivalent to leaving the `*…` off |
 
 A bare host is given `https://`, because that is the only scheme a public
 Freizone server is reachable over. A scheme that is written out is left alone —

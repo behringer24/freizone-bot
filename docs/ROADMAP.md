@@ -196,6 +196,18 @@ partial success cannot page the recipients who already have it.
   an account id in the group route (they differ by one character), a duplicate
   recipient, and any single bad entry in the list.
 
+  Reading the app's parser side by side with this new one afterwards showed the
+  cost of there being two: they disagreed in three places, and one of the three
+  was a misroute rather than a cosmetic difference. `*local`, and a bare
+  trailing `*`, mean "whatever server this resolves against" -- the format says
+  so explicitly -- and this parser read `local` as a hostname, turning a
+  documented spelling into `https://local`, which fails as an unreachable server
+  instead of as a misread address. Fixed here; the other two (canonical
+  rendering keeping the default scheme, and no answer at all for "are these two
+  server spellings the same server") are recorded in freizone-server's `SRV-31`,
+  which gives the composite `id*server` form one home in `pkg/address` and
+  leaves this file a thin wrapper holding only the bot's own policy.
+
   **This is the fourth time in one session that documentation ran ahead of the
   code**, after SRV-23's status, the group route, and the join catch-up. The
   common thread is worth naming: each was a sentence written while designing
