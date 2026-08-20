@@ -133,7 +133,7 @@ func EnsureRegistered(ctx context.Context, c *client.Client, cfg *config.Config,
 // later without knowing any commands.
 func WriteAddress(cfg *config.Config, id client.Identity) error {
 	path := cfg.AddressFile()
-	line := id.AccountID + "*" + id.Server + "\n"
+	line := id.Address().String() + "\n"
 	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}

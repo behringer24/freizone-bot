@@ -168,8 +168,12 @@ func TestWriteAddressIsReadableAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading it back: %v", err)
 	}
-	// The `id*server` form, which is what a person pastes into the app.
-	want := id.AccountID + "*" + id.Server + "\n"
+	// The canonical `id*server` form, which is what a person pastes into the app
+	// -- spelled out here rather than taken from id.Address() so that this
+	// pins the format instead of agreeing with whatever it currently produces.
+	// The default scheme is absent on purpose: an https server is the ordinary
+	// case, so leaving it out is what makes a non-default scheme visible.
+	want := id.AccountID + "*chat.example.org\n"
 	if string(raw) != want {
 		t.Errorf("address file holds %q, want %q", raw, want)
 	}

@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/behringer24/freizone-server/pkg/address"
 )
 
 // The FREIZONE_BOT_ prefix rather than the terser BOT_ the gateway's own
@@ -166,7 +168,11 @@ type Config struct {
 // real environment.
 func Load(getenv func(string) string) (*Config, error) {
 	cfg := &Config{
-		Server:        strings.TrimSpace(getenv(envServer)),
+		// The same rule as the server half of an address: a bare host gets
+		// https, a scheme that was written out is respected, trailing slashes
+		// go. Shared rather than re-derived -- it had already been written twice
+		// before SRV-31, and a rule with two homes has a half-life.
+		Server:        address.NormalizeServer(getenv(envServer)),
 		StateDir:      orDefault(getenv(envStateDir), defaultStateDir),
 		ControlSocket: strings.TrimSpace(getenv(envControlSocket)),
 		ControlGroup:  strings.TrimSpace(getenv(envControlGroup)),

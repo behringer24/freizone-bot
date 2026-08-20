@@ -53,6 +53,9 @@ func runWhoami(args []string) error {
 	if err := account.WriteAddress(cfg, id); err != nil {
 		return err
 	}
-	fmt.Printf("%s*%s\n", id.AccountID, id.Server)
+	// Canonical rather than hyphenated: this goes into a pipe as often as onto a
+	// screen, and a caller splitting on `*` should not also have to strip
+	// separators.
+	fmt.Printf("%s\n", id.Address())
 	return nil
 }
