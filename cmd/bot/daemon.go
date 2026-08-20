@@ -121,6 +121,7 @@ func runDaemon(args []string) error {
 		box:     box,
 		sender:  outbound.NewSender(c),
 		limiter: outbound.NewLimiter(cfg.RatePerMinute, time.Now),
+		deduper: outbound.NewDeduper(cfg.DedupWindow, time.Now),
 		started: time.Now(),
 		id:      id,
 	}
@@ -182,6 +183,7 @@ type daemon struct {
 	box     *outbox.Outbox
 	sender  outbound.Sender
 	limiter *outbound.Limiter
+	deduper *outbound.Deduper
 	started time.Time
 	id      client.Identity
 
@@ -218,9 +220,30 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 		return nil, &ipc.Error{Code: ipc.CodeBadRequest, Message: "nothing to send"}
 	}
 
-	dests, err := outbound.Resolve(d.cfg, body.Route)
+	dests, err := outbound.Resolve(d.cfg, body.Route, body.Severity)
 	if err != nil {
 		return nil, &ipc.Error{Code: ipc.CodeNoRoute, Message: err.Error()}
+	}
+
+	msg := outbound.Message{
+		Title:    body.Title,
+		Text:     body.Text,
+		Severity: body.Severity,
+		Source:   body.Source,
+		At:       body.At,
+	}
+
+	// Deduplication before the rate cap, on purpose. They answer different
+	// questions -- "is this the same alert again" and "is too much leaving at
+	// once" -- and a repeat that the deduper would swallow should not consume a
+	// slot in the rate window on its way to being dropped. The other order would
+	// let one flapping check exhaust the budget for everything else.
+	if allowed, note := d.deduper.Allow(msg, body.DedupKey); !allowed {
+		d.logger.Info("message suppressed as a duplicate",
+			"severity", body.Severity, "source", body.Source, "title", body.Title)
+		return ipc.SendResponse{Suppressed: true, SuppressedBy: "duplicate"}, nil
+	} else if note != "" {
+		msg.Text += note
 	}
 
 	allowed, note := d.limiter.Allow()
@@ -229,16 +252,9 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 		// swallows is indistinguishable from a bot that has died.
 		d.logger.Warn("message suppressed by the rate limit",
 			"source", body.Source, "severity", body.Severity)
-		return ipc.SendResponse{Suppressed: true}, nil
+		return ipc.SendResponse{Suppressed: true, SuppressedBy: "rate"}, nil
 	}
-
-	msg := outbound.Message{
-		Title:    body.Title,
-		Text:     body.Text + note,
-		Severity: body.Severity,
-		Source:   body.Source,
-		At:       body.At,
-	}
+	msg.Text += note
 	if msg.At.IsZero() {
 		msg.At = time.Now().UTC()
 	}

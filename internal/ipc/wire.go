@@ -102,9 +102,15 @@ type SendRequest struct {
 	// than looking current.
 	At time.Time `json:"at"`
 
-	// Route names which configured route to use. Empty means every route that
-	// is configured, which is the ordinary case.
+	// Route names which configured route to use. Empty means the severity
+	// mapping decides, and failing that every route that is configured.
 	Route string `json:"route,omitempty"`
+
+	// DedupKey says which messages count as the same incident, for the
+	// deduplication window. Only the caller knows that: two alerts with
+	// identical text can be separate events, and two with different text can be
+	// one. Empty falls back to severity, title and source.
+	DedupKey string `json:"dedup_key,omitempty"`
 
 	// Wait asks the daemon to answer only once the message has been delivered
 	// rather than once it is durably queued.
@@ -120,11 +126,16 @@ type SendResponse struct {
 	// Delivered is set only for a request that asked to wait.
 	Delivered int `json:"delivered,omitempty"`
 
-	// Suppressed reports that the rate cap swallowed this message rather than
-	// sending it. Not an error -- the cap exists so a storm cannot page
-	// somebody into ignoring their phone -- but the caller should be told
-	// rather than left believing it went.
+	// Suppressed reports that this message was swallowed rather than sent. Not
+	// an error -- the caps exist so a storm cannot page somebody into ignoring
+	// their phone -- but the caller should be told rather than left believing it
+	// went.
 	Suppressed bool `json:"suppressed,omitempty"`
+
+	// SuppressedBy names which cap did it, because the two mean different
+	// things to whoever is reading: "rate" is the bot protecting the channel,
+	// "duplicate" is this exact alert already having been sent.
+	SuppressedBy string `json:"suppressed_by,omitempty"`
 }
 
 // StatusResponse is what the daemon says about itself.

@@ -9,6 +9,7 @@ package outbound
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -89,13 +90,24 @@ func (m Message) Render(now time.Time) string {
 	return b.String()
 }
 
-// Resolve is where a message goes, given the configuration and an optional
-// named route.
+// Resolve is where a message goes, given the configuration, an optional named
+// route and the message's severity.
 //
 // The group and the peers are independent rather than alternatives: with both
 // configured a message goes to both, which is how escalation is expressed --
 // the team channel *and* whoever is carrying the pager.
-func Resolve(cfg *config.Config, route string) ([]Destination, error) {
+//
+// Three things can narrow that, in this order of authority:
+//
+//  1. An explicit route on the request. The caller asked for one thing.
+//  2. A severity mapping in the configuration, which is the standing rule for
+//     what warrants waking somebody.
+//  3. Nothing, meaning every configured route.
+//
+// The explicit route wins over the severity mapping deliberately: a person
+// typing `-route peers` is doing something out of the ordinary on purpose, and
+// having configuration override that would make the flag a suggestion.
+func Resolve(cfg *config.Config, route, severity string) ([]Destination, error) {
 	var out []Destination
 
 	wantGroup := route == "" || route == RouteGroup
@@ -103,6 +115,14 @@ func Resolve(cfg *config.Config, route string) ([]Destination, error) {
 
 	if route != "" && !wantGroup && !wantPeers {
 		return nil, fmt.Errorf("unknown route %q (known: %s, %s)", route, RouteGroup, RoutePeers)
+	}
+
+	// The severity mapping only applies when the caller did not name a route.
+	if route == "" && len(cfg.SeverityRoutes) > 0 {
+		if names, ok := cfg.SeverityRoutes[strings.ToLower(strings.TrimSpace(severity))]; ok {
+			wantGroup = slices.Contains(names, RouteGroup)
+			wantPeers = slices.Contains(names, RoutePeers)
+		}
 	}
 	if wantGroup && cfg.RouteGroup != "" {
 		out = append(out, Destination{Kind: KindGroup, ID: cfg.RouteGroup})
@@ -113,10 +133,20 @@ func Resolve(cfg *config.Config, route string) ([]Destination, error) {
 		}
 	}
 	if len(out) == 0 {
-		if route != "" {
+		switch {
+		case route != "":
 			return nil, fmt.Errorf("route %q is not configured", route)
+		case severity != "" && len(cfg.SeverityRoutes) > 0:
+			// Distinguished from "nothing configured at all", because the fix is
+			// different: here the routing rule and the configured routes
+			// disagree, and an operator needs to know which of the two to
+			// change.
+			return nil, fmt.Errorf(
+				"severity %q is routed somewhere this bot has no route for -- check %s against the configured routes",
+				severity, "FREIZONE_BOT_SEVERITY_ROUTES")
+		default:
+			return nil, fmt.Errorf("no route configured")
 		}
-		return nil, fmt.Errorf("no route configured")
 	}
 	return out, nil
 }

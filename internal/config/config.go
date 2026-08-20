@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,8 +33,11 @@ const (
 	envControlSocket = "FREIZONE_BOT_CONTROL_SOCKET"
 	envControlGroup  = "FREIZONE_BOT_CONTROL_GROUP"
 
-	envRouteGroup = "FREIZONE_BOT_ROUTE_GROUP"
-	envRoutePeers = "FREIZONE_BOT_ROUTE_PEERS"
+	envRouteGroup     = "FREIZONE_BOT_ROUTE_GROUP"
+	envRoutePeers     = "FREIZONE_BOT_ROUTE_PEERS"
+	envSeverityRoutes = "FREIZONE_BOT_SEVERITY_ROUTES"
+
+	envDedupWindow = "FREIZONE_BOT_DEDUP_WINDOW_MINUTES"
 
 	envMaxAge    = "FREIZONE_BOT_MAX_AGE_MINUTES"
 	envRate      = "FREIZONE_BOT_RATE_PER_MINUTE"
@@ -108,6 +112,23 @@ type Config struct {
 	RouteGroup string
 	RoutePeers []string
 
+	// SeverityRoutes narrows where a given severity goes, e.g. everything to
+	// the group but only `critical` to the pager as well. A severity with no
+	// entry -- and every message when this is unset -- goes everywhere that is
+	// configured, which is the behaviour without it.
+	//
+	// Deliberately not a fixed set of severities: they are free-form, because
+	// whatever monitoring system is upstream already has its own vocabulary and
+	// making it match one invented here would be work for nobody's benefit.
+	SeverityRoutes map[string][]string
+
+	// DedupWindow collapses repeats of the same message. Zero is off, which is
+	// the default: the bot is a delivery path first, and deciding that two
+	// alerts are "the same" is a judgement the monitoring system upstream is
+	// usually better placed to make. Worth turning on for a check that is known
+	// to flap.
+	DedupWindow time.Duration
+
 	MaxAge              time.Duration
 	RatePerMinute       int
 	OutboxMax           int
@@ -154,6 +175,17 @@ func Load(getenv func(string) string) (*Config, error) {
 		return nil, err
 	}
 	cfg.MaintenanceInterval = time.Duration(minutes) * time.Minute
+
+	// Zero is meaningful here (off), so this cannot go through positiveInt.
+	dedupMinutes, err := nonNegativeInt(getenv, envDedupWindow, 0)
+	if err != nil {
+		return nil, err
+	}
+	cfg.DedupWindow = time.Duration(dedupMinutes) * time.Minute
+
+	if cfg.SeverityRoutes, err = parseSeverityRoutes(getenv(envSeverityRoutes)); err != nil {
+		return nil, err
+	}
 
 	if cfg.ControlSocket == "" {
 		cfg.ControlSocket = filepath.Join(cfg.StateDir, "control.sock")
@@ -219,6 +251,75 @@ func loadInviteCode(getenv func(string) string) (string, error) {
 		return "", fmt.Errorf("%s: %w", envInviteFile, err)
 	}
 	return strings.TrimSpace(string(raw)), nil
+}
+
+// KnownRoutes are the route names a severity mapping may refer to. Kept here so
+// config can reject a typo at load time rather than at the first message that
+// uses it -- an alerting tool discovering its own misconfiguration during an
+// incident is the wrong moment.
+var KnownRoutes = []string{"group", "peers"}
+
+// parseSeverityRoutes reads `critical=group+peers,warning=group`.
+//
+// Two separators rather than one because the two levels mean different things: a
+// comma separates severities, a plus joins routes for one severity. Using commas
+// for both would make `critical=group,peers` ambiguous with a second severity
+// named "peers".
+func parseSeverityRoutes(raw string) (map[string][]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	out := map[string][]string{}
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue // a trailing comma is not a configuration error
+		}
+		severity, routes, ok := strings.Cut(pair, "=")
+		if !ok {
+			return nil, fmt.Errorf("%s: %q is not severity=route (e.g. critical=group+peers)", envSeverityRoutes, pair)
+		}
+		severity = strings.ToLower(strings.TrimSpace(severity))
+		if severity == "" {
+			return nil, fmt.Errorf("%s: %q names no severity", envSeverityRoutes, pair)
+		}
+
+		var names []string
+		for _, r := range strings.Split(routes, "+") {
+			r = strings.ToLower(strings.TrimSpace(r))
+			if r == "" {
+				continue
+			}
+			if !slices.Contains(KnownRoutes, r) {
+				return nil, fmt.Errorf("%s: unknown route %q for severity %q (known: %s)",
+					envSeverityRoutes, r, severity, strings.Join(KnownRoutes, ", "))
+			}
+			names = append(names, r)
+		}
+		if len(names) == 0 {
+			return nil, fmt.Errorf("%s: severity %q is mapped to no route", envSeverityRoutes, severity)
+		}
+		out[severity] = names
+	}
+	return out, nil
+}
+
+// nonNegativeInt is positiveInt where zero is a meaningful value rather than a
+// typo -- a window of zero means "do not deduplicate".
+func nonNegativeInt(getenv func(string) string, env string, def int) (int, error) {
+	v := strings.TrimSpace(getenv(env))
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: invalid value %q (must be a whole number): %w", env, v, err)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("%s must not be negative, got %d", env, n)
+	}
+	return n, nil
 }
 
 func positiveInt(getenv func(string) string, env string, def int) (int, error) {
