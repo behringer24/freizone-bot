@@ -68,6 +68,25 @@ message arrives in the operator's Freizone group with the bot as a member.
   that a live path and a catch-up path drifted; it seems to be the default
   outcome of having two, unless one function owns both.
 
+- 2026-08-20 — **and a third, found by Andreas asking how the join actually
+  works.** An invitation is announced exactly *once*: the receive path reports
+  it when the facts are new to the device and never again. So an invitation that
+  arrived while no group was configured was folded, ignored, and never mentioned
+  by anything afterwards -- configuring the group later and restarting did
+  nothing at all.
+
+  That is precisely the order the first run leads an operator into, since it
+  prints "invite that address to the group it should post in" *before* anybody
+  has looked up a group id. So the documented order was the only one that
+  worked, and it was the less likely one.
+
+  Fixed by reading the facts already held at startup rather than waiting to be
+  told again, and verified in that order against a real server: invited with no
+  group configured (ignored), then configured and restarted -- the bot finishes
+  the invitation and the founder sees a full member. Four tests cover the
+  decisions around it, including the two that must *not* join: already a member,
+  and holding a group's facts after having been removed from it.
+
 - 2026-08-20 — the receiving half works, verified against a real server: the
   daemon registers itself on first start, prints the one fact an operator must
   act on (its address, on stderr as well as in the log, plus `<state>/address`

@@ -57,7 +57,9 @@ A daemon with no route refuses to start rather than warning: one that accepts me
 
 ### Putting it in a group
 
-Create the group in the app, copy its id into `FREIZONE_BOT_ROUTE_GROUP`, then invite the bot to it. **It accepts that invitation by itself** — naming the group in the configuration is what asks for it.
+Create the group in the app, put its id in `FREIZONE_BOT_ROUTE_GROUP`, and invite the bot to it. **It accepts that invitation by itself** — naming the group in the configuration is what asks for it.
+
+The order does not matter. Invite first and configure afterwards, and the bot finishes the invitation on its next start: an invitation is only announced once, so it reads the facts it already holds rather than waiting to be told again.
 
 Invitations to any *other* group are left unanswered unless you set `FREIZONE_BOT_ACCEPT_GROUP_INVITES=true`. That is deliberate: an invitation you did not ask for is somebody else deciding what your bot is a member of, and from then on it holds that group's facts and receives its traffic. The bot never declines either — declining is a signed fact that says something, and the honest state is "nobody asked this bot to be there".
 
