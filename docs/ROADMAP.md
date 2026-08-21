@@ -530,3 +530,43 @@ Status: `done`
   and this environment holds no key, so the only evidence I had was the stale
   cache. A plain HTTPS `GET .../@v/v0.23.0.info` needs no credentials and would
   have answered the question directly.
+
+### BOT-14 — The control group was read and then ignored
+Status: `done`
+
+- 2026-08-21 — `FREIZONE_BOT_CONTROL_GROUP` was parsed into the configuration
+  and **used nowhere**. No `Chown`, no group lookup, nothing. So the security
+  model's own sentence -- "the socket's parent directory is the gate: 0750,
+  owned by the daemon's user and an operator group you choose" -- described a
+  mechanism that did not exist.
+
+  It failed closed, which is the only reason this was not worse: the directory
+  is 0750 owned by the daemon's user, so nobody else could send either way. But
+  an operator who set the variable believed they had granted specific people the
+  ability to page, and nothing told them otherwise. Configured access that does
+  not exist is worse than access that is plainly unavailable, because it is
+  reasoned about as though it works.
+
+  Found while answering a question about whether the bot should run in a
+  container at all -- the answer needs this mechanism, since it is what lets a
+  host's systemd unit send into a containerised daemon without handing that unit
+  the docker socket, which is root-equivalent. The documentation had confidently
+  answered a question the code could not.
+
+  Now: the group is resolved *before* anything is created, applied to both the
+  directory and the socket (granting one without the other grants nothing), and
+  a failure stops the daemon. A numeric gid is accepted as well as a name,
+  because a container has no `/etc/group` entry for a host group and requiring a
+  name would leave the container case unconfigurable. On Windows a group is
+  refused rather than ignored: the mode bits there are synthesised, so honouring
+  it would be exactly the same false promise in a new place -- that is `BOT-07`.
+
+- 2026-08-21 — the README now answers *when* to use the image, which it had
+  never said. The binary is static and the image is distroless, so the container
+  buys no isolation that was not already there -- it is a distribution and
+  lifecycle mechanism, and every part of it is also a systemd unit. The plain
+  binary is right when the bot is the machine's own pager, which is the flagship
+  `systemd OnFailure=` case; the container is right when the bot is a service
+  among services. And on a farm, one bot per host means every one of those hosts
+  can read the group's future traffic, so the shape you want is one bot the
+  others reach -- which needs `BOT-08`, or SSH in the meantime.

@@ -23,7 +23,7 @@ func serve(t *testing.T, handlers map[string]Handler) string {
 	// platforms, and t.TempDir() nests deeply.
 	addr := filepath.Join(t.TempDir(), "c.sock")
 
-	ln, err := ipc.Listen(addr)
+	ln, err := ipc.Listen(addr, "")
 	if err != nil {
 		t.Fatalf("ipc.Listen: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestNoDaemonSaysWhatToDo(t *testing.T) {
 // delivered after the restart.
 func TestShutdownStopsAccepting(t *testing.T) {
 	addr := filepath.Join(t.TempDir(), "c.sock")
-	ln, err := ipc.Listen(addr)
+	ln, err := ipc.Listen(addr, "")
 	if err != nil {
 		t.Fatalf("ipc.Listen: %v", err)
 	}

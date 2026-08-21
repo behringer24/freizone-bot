@@ -30,7 +30,10 @@ func dial(ctx context.Context, addr string) (net.Conn, error) {
 	return d.DialContext(ctx, "unix", addr)
 }
 
-func listen(addr string) (net.Listener, error) {
+func listen(addr, group string) (net.Listener, error) {
+	if group != "" {
+		return nil, fmt.Errorf("FREIZONE_BOT_CONTROL_GROUP is not supported on Windows: the socket's mode bits here are synthesised, so granting a group would not actually grant anything")
+	}
 	if err := os.MkdirAll(filepath.Dir(addr), 0o750); err != nil {
 		return nil, fmt.Errorf("creating the socket directory: %w", err)
 	}

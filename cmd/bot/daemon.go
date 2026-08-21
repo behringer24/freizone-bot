@@ -109,7 +109,7 @@ func runDaemon(args []string) error {
 	// Opened only now, after the account lock is held: a leftover socket file
 	// may be cleared only once something proves no daemon is running, and the
 	// lock is that proof.
-	ln, err := ipc.Listen(cfg.ControlSocket)
+	ln, err := ipc.Listen(cfg.ControlSocket, cfg.ControlGroup)
 	if err != nil {
 		return err
 	}
