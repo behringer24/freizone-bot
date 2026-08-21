@@ -58,12 +58,19 @@ carries messages in both directions.
 
 ### Known limitations
 
-* **This tag does not build from a clean checkout yet.** `go.mod` requires
+* **This tag does not build from a clean checkout.** `go.mod` requires
   freizone-server `v0.22.0`, which predates `SRV-30` and `SRV-31` — the account
   registration, the directory lock, the queue drain and the address parser this
-  bot is built on. Until a freizone-server release contains them and `go.mod`
-  names it, building requires a `go.work` pointing at a freizone-server checkout
-  (see the README's development section).
+  bot is built on. Building it needs a `go.work` pointing at a freizone-server
+  checkout (see the README's development section).
+
+  freizone-server `v0.23.0` contains all of it, so the fix is one line —
+  `go mod edit -require=github.com/behringer24/freizone-server@v0.23.0`,
+  followed by deleting `go.work`. It is deliberately not done here: the module
+  graph needs the required version's `go.mod` to be *fetchable* even in
+  workspace mode, so naming a tag before it is pushed breaks the local build
+  rather than anticipating the fix. The bump belongs in the first release cut
+  after that tag is reachable.
 * Pairing a `resolved` notice with its `firing` is not implemented (`BOT-03`).
 * No webhook receiver (`BOT-08`), no server-assistant role (`BOT-09`), no
   interpretation by a model (`BOT-10`).
