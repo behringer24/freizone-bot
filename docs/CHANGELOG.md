@@ -10,6 +10,38 @@ lives there.
 
 Releases are cut as annotated git tags.
 
+## [0.2.0] — 2026-08-21
+
+The first release that builds from a clean checkout — 0.1.0's image build never
+completed, so this is the first published image as well.
+
+### Added
+
+* **Actions an operator can declare in a file (`BOT-12`).**
+  `FREIZONE_BOT_ACTIONS_FILE` takes two kinds: a fixed reply, and an HTTP
+  request whose answer becomes the reply. Adding a command no longer means
+  editing Go and rebuilding. Deliberately absent is the third kind everybody
+  asks for — a shell command in a configuration file — because that is remote
+  code execution for anybody who gets a message past the allow-list, dressed as
+  a convenience feature. Anything that must run on the host belongs behind an
+  endpoint, which the request kind already reaches
+* **A build-and-test workflow**, which this repo did not have. Until now the
+  only workflow published an image on a version tag, so nothing ever compiled
+  the repo except a developer machine — and a developer machine resolved
+  `pkg/client` from a working tree next door rather than from the module proxy
+
+### Fixed
+
+* **The release image could not be built (`go.sum` was missing entirely).** Every
+  build here went through a `go.work`, which keeps its hashes in `go.work.sum`,
+  so `go.sum` had never been generated — and the first thing to ever need it was
+  the Dockerfile, in public, on a tag. One step behind it, `go.mod` still named
+  freizone-server `v0.22.0`, which predates half the API this bot calls. Both are
+  the same root cause: a local build and a CI build that were not the same build,
+  with nothing running the second one until a release. `go.mod` now names
+  `v0.23.0`, `go.sum` is committed, the workspace file is gone, and CI runs the
+  standalone build on every push
+
 ## [0.1.0] — 2026-08-21
 
 The first release: a daemon that holds a Freizone account, stays connected, and
@@ -58,19 +90,12 @@ carries messages in both directions.
 
 ### Known limitations
 
-* **This tag does not build from a clean checkout.** `go.mod` requires
-  freizone-server `v0.22.0`, which predates `SRV-30` and `SRV-31` — the account
-  registration, the directory lock, the queue drain and the address parser this
-  bot is built on. Building it needs a `go.work` pointing at a freizone-server
-  checkout (see the README's development section).
-
-  freizone-server `v0.23.0` contains all of it, so the fix is one line —
-  `go mod edit -require=github.com/behringer24/freizone-server@v0.23.0`,
-  followed by deleting `go.work`. It is deliberately not done here: the module
-  graph needs the required version's `go.mod` to be *fetchable* even in
-  workspace mode, so naming a tag before it is pushed breaks the local build
-  rather than anticipating the fix. The bump belongs in the first release cut
-  after that tag is reachable.
+* **This tag does not build from a clean checkout, and its image never got
+  built.** `go.mod` requires freizone-server `v0.22.0`, which predates `SRV-30`
+  and `SRV-31` — the account registration, the directory lock, the queue drain
+  and the address parser this bot is built on — and there was no `go.sum` at
+  all. Fixed in 0.2.0; use that instead. Nothing was published from this tag,
+  since the build failed before the registry push.
 * Pairing a `resolved` notice with its `firing` is not implemented (`BOT-03`).
 * No webhook receiver (`BOT-08`), no server-assistant role (`BOT-09`), no
   interpretation by a model (`BOT-10`).

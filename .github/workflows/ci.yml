@@ -1,0 +1,65 @@
+# Build and test on every push.
+#
+# This exists because it was missing. Until v0.1.0 the only workflow here
+# published an image on a version tag, so nothing ever compiled this repo
+# except a developer machine -- and a developer machine had a `go.work`
+# pointing at a freizone-server checkout next door, which resolves the
+# dependency from a working tree instead of from the module proxy.
+#
+# The two builds were therefore not the same build, and the difference stayed
+# invisible until a release. `go.sum` had never been generated, because a
+# workspace keeps its hashes in `go.work.sum`; the first thing to ever need
+# it was the Dockerfile, in public, on a tag. Then, one step behind that,
+# `go.mod` still named a freizone-server release that predated half the API
+# the bot calls.
+#
+# So this job's whole point is to be the build that CI and a release do,
+# running as early and as often as possible rather than once per tag.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The version in go.mod, rather than one pinned here: two places naming
+      # a toolchain is two places to forget.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Fails if go.mod or go.sum would change -- which is what a missing
+      # go.sum entry, or a dependency added without tidying, looks like.
+      - name: Dependencies are what the files say
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy -diff
+
+      - name: Formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      # Race detector on, because the daemon is several loops around one
+      # account and the interesting failures there are not deterministic.
+      - name: Test
+        run: go test -race ./...
