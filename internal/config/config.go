@@ -44,6 +44,7 @@ const (
 	envCommanders        = "FREIZONE_BOT_COMMANDERS"
 	envAllowGroupCommand = "FREIZONE_BOT_ALLOW_GROUP_COMMANDS"
 	envJokesFile         = "FREIZONE_BOT_JOKES_FILE"
+	envActionsFile       = "FREIZONE_BOT_ACTIONS_FILE"
 	envAcceptInvites     = "FREIZONE_BOT_ACCEPT_GROUP_INVITES"
 
 	envMaxAge    = "FREIZONE_BOT_MAX_AGE_MINUTES"
@@ -158,6 +159,10 @@ type Config struct {
 	// built-in one.
 	JokesFile string
 
+	// ActionsFile declares actions in a file instead of in Go -- a fixed reply,
+	// or an HTTP request to something that already exists. See internal/declared.
+	ActionsFile string
+
 	MaxAge              time.Duration
 	RatePerMinute       int
 	OutboxMax           int
@@ -180,6 +185,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		RoutePeers:    splitList(getenv(envRoutePeers)),
 		Commanders:    splitList(getenv(envCommanders)),
 		JokesFile:     strings.TrimSpace(getenv(envJokesFile)),
+		ActionsFile:   strings.TrimSpace(getenv(envActionsFile)),
 	}
 
 	level, err := parseLogLevel(orDefault(getenv(envLogLevel), "info"))
