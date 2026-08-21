@@ -10,6 +10,28 @@ lives there.
 
 Releases are cut as annotated git tags.
 
+## [Unreleased]
+
+### Fixed
+
+* **`FREIZONE_BOT_CONTROL_GROUP` does something now (`BOT-14`).** It was read
+  from the environment and used nowhere, so an operator who named a group
+  believed they had let specific people send, and nothing had happened. It
+  failed closed, which is the only reason it was not worse. The group is applied
+  to the socket and its directory, accepts a numeric gid as well as a name (a
+  container has no `/etc/group` entry for a host group, so a name would not
+  resolve there), and one that cannot be resolved or handed out stops the daemon
+  instead of being skipped
+
+### Changed
+
+* **The README says when to use the container and when not to**, which it had
+  never said. The binary is static and the image is distroless, so the container
+  buys no isolation that was not already there — it is a distribution and
+  lifecycle mechanism, and so is a systemd unit. Also what a farm of many
+  machines actually wants, since one bot per host puts every one of those hosts
+  inside the alert group's confidentiality boundary
+
 ## [0.2.0] — 2026-08-21
 
 The first release that builds from a clean checkout — 0.1.0's image build never
