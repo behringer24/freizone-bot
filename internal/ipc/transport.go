@@ -82,4 +82,8 @@ func Do(ctx context.Context, addr string, req Request, timeout time.Duration) (*
 // no daemon is running, and the lock is that proof. Without it, "stale" and
 // "a daemon is running" are indistinguishable, and clearing the file would
 // steal a live daemon's socket.
-func Listen(addr string) (net.Listener, error) { return listen(addr) }
+// group, when not empty, is an operating-system group given write access to the
+// socket -- the mechanism that lets somebody other than the daemon's own user
+// send. On Windows it is refused rather than ignored, since the mode bits there
+// are synthesised and honouring it would be a claim this cannot keep (BOT-07).
+func Listen(addr, group string) (net.Listener, error) { return listen(addr, group) }

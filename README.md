@@ -155,6 +155,89 @@ ExecStart=/usr/local/bin/freizone-bot send -severity critical -title "%i failed"
 
 Nagios, Icinga, Zabbix, Sensu, cron and CI steps all take the same shape — anything that can run a command. Alertmanager cannot: it has no exec receiver and only posts webhooks, so it needs `BOT-08`.
 
+## A container, or just the binary?
+
+There is an image, and it is often the wrong choice. Worth being explicit about,
+because the image existing tends to read as a recommendation.
+
+The binary is static (`CGO_ENABLED=0`) and the image is `distroless/static` with
+nothing else in it, so the container buys **no isolation you did not already
+have** — it is a distribution and lifecycle mechanism: a restart policy, log
+collection, resource limits, and a declarative record of the configuration.
+Every one of those is also a systemd unit.
+
+**Take the plain binary when the bot is the machine's own pager.** That is the
+flagship case above: `systemd OnFailure=`, a cron job, a CI step, a Nagios
+handler. All of those run *on the host*, and the daemon's only ingress is a unix
+socket — so containerising the daemon puts a boundary between the sender and the
+receiver that was not there a moment ago, for a case that never needed one.
+
+**Take the container when the bot is a service among services.** A compose stack
+or an orchestrated farm, where the things that would page you are themselves
+containers, where you already have somewhere for logs to go, and where one more
+unit file is the odd shape rather than one more service.
+
+### If you containerise and still want host senders
+
+The socket lives in the state directory, and the state directory is a mounted
+volume — so it is already on the host. Point the host's binary at it:
+
+```sh
+FREIZONE_BOT_CONTROL_SOCKET=/srv/freizone-bot/data/control.sock \
+  freizone-bot send -title "backup failed on $(hostname)"
+```
+
+For that to work the sender must be in a group the socket grants, which is what
+`FREIZONE_BOT_CONTROL_GROUP` is for. Set it to a **numeric gid** in a container:
+the container has no `/etc/group` entry for a host group, so a name would not
+resolve there.
+
+The obvious alternative is `docker exec <container> /freizone-bot send …`, and
+it is the worse one for anything unattended: reaching the docker socket is
+root-equivalent on the host. Giving a cron job the ability to send a message
+should not also give it the ability to start a privileged container. The
+socket-and-gid route grants exactly "may send a message" — which is still not
+nothing, since whoever can send can also make this bot say *"false alarm, all
+clear"* during a real incident.
+
+### On a farm of many machines
+
+Two shapes, and today only one of them exists.
+
+**One bot per host** works now and needs no network at all: each host's failures
+page directly through its own socket. The costs are real, though. Every host
+needs its own account, its own invite, its own membership in the group — the
+group's member list becomes an inventory of the farm, and it grows and shrinks
+with the farm. Worse, **every one of those hosts can read that group's future
+traffic**, because a group member is a group member. Ten alerting hosts is ten
+machines inside one confidentiality boundary, and the compromise of the least
+important of them reads everything.
+
+**One bot for the whole farm** is the shape you actually want at that size, and
+it needs an ingress this bot does not have: something the other hosts can reach
+over the network. That is exactly `BOT-08`, and it is why the webhook is a
+release of its own with its own authentication design rather than a flag.
+
+Until then there is a middle road that needs no new code, because the transport
+already exists and is already authenticated: run the daemon on one host and let
+the others reach its CLI over **SSH**.
+
+```sh
+ssh alerts.internal freizone-bot send -severity critical \
+  -source "$(hostname)" -title "disk full"
+```
+
+One account, one group member, one set of keys to protect — and the authorisation
+question is answered by something that already knows how to answer it. What it
+costs is an SSH round trip per message and a key on every host, which for
+alerting is usually the right trade.
+
+If you do end up with many bots in one group, the thing that fixes the
+read-everything problem is not a bot feature: it is broadcast
+([`SRV-16`](https://github.com/behringer24/freizone-server/blob/master/docs/ROADMAP.md)),
+where recipients do not become members and do not see each other. That is the
+deployment where it earns its keep.
+
 ## Local development
 
 ```sh
@@ -175,7 +258,7 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_INVITE_CODE_FILE` | – | Path to a file holding the invite code. Mutually exclusive with the variable above — setting both is refused rather than resolved by precedence, so there is never a question which one was used. |
 | `FREIZONE_BOT_LOG_LEVEL` | `info` | `debug` · `info` · `warn` (or `warning`) · `error`. |
 | `FREIZONE_BOT_CONTROL_SOCKET` | `<STATE_DIR>/control.sock` | Where the daemon listens for the CLI. Defaulting inside the state directory means a CLI invocation that inherits the daemon's environment needs no further configuration, and a container's data volume carries it. `/run/freizone-bot/control.sock` is the more conventional place under systemd (`RuntimeDirectory=freizone-bot`) and is not the default only because that path does not exist in a container. |
-| `FREIZONE_BOT_CONTROL_GROUP` | – | A group that owns the socket's parent directory, so members of it may talk to the daemon. Unset leaves the directory to the daemon's own user alone. |
+| `FREIZONE_BOT_CONTROL_GROUP` | – | A group given write access to the control socket and its directory, so its members may send. A group **name or a numeric gid** — a container has no `/etc/group` entry for a host group, so requiring a name would make the container case unconfigurable. Unset leaves the socket to the daemon's own user alone. A group that cannot be resolved, or that the daemon's user cannot hand out (it must be a member, or root), stops the daemon rather than being skipped: configured access that does not exist is worse than none. Unix only — on Windows it is refused rather than ignored, because the mode bits there are synthesised and honouring it would be a promise this cannot keep (`BOT-07`). |
 | `FREIZONE_BOT_ROUTE_GROUP` | – | A group id messages are sent to. The bot **accepts an invitation to this group automatically** — naming it is asking for it. Create the group, invite the bot, and it joins on its own. |
 | `FREIZONE_BOT_ACCEPT_GROUP_INVITES` | `false` | Whether the bot accepts invitations to *other* groups too. Off by default: an invitation you did not ask for is a stranger deciding what your bot is a member of, and from then on it holds that group’s facts and receives its traffic. |
 | `FREIZONE_BOT_ROUTE_PEERS` | – | Comma-separated recipients messages are sent to individually — see [Addressing recipients](#addressing-recipients) for the accepted spellings. **Independent of the group route, not an alternative to it** — with both set, a message goes to both, which is how escalation is expressed: the team channel *and* whoever is carrying the pager. |
