@@ -342,7 +342,28 @@ go test ./...
 
 There is no CI beyond the release image build, so these are run by hand.
 
-While `pkg/client` is changing alongside this repo, builds resolve it through a **gitignored `go.work`** pointing at a `freizone-server` checkout next door, rather than a `replace` directive in `go.mod`. That is deliberate: a `replace` travels with the repository, so CI and the Docker build would silently compile against whichever branch happened to be checked out. A workspace file stays on the machine that created it.
+`pkg/client` resolves as an ordinary tagged module (`go.mod` names the
+freizone-server release), so a plain `go build` here is the same build CI and
+the Docker image do. That is the point, and it was learned the hard way.
+
+Until 0.1.0 this repo built through a gitignored `go.work` pointing at a
+freizone-server checkout next door — chosen over a `replace` directive in
+`go.mod`, because a `replace` travels with the repository and would have made CI
+compile against whichever branch happened to be sitting there. That reasoning
+was right and the consequence was missed: a workspace keeps its hashes in
+`go.work.sum`, so **`go.sum` was never generated at all**, and the first thing
+that ever needed it was the release image build — in public, on a tag. One step
+behind that, `go.mod` still named a freizone-server release predating half the
+API this bot calls.
+
+If you do need to develop against an unreleased `pkg/client`, a `go.work` is
+still the right tool (both files stay gitignored). Just know that while it
+exists, your build and CI's build are different builds — so run the CI job's
+steps before tagging anything:
+
+```sh
+go mod tidy -diff && go vet ./... && go test -race ./...
+```
 
 ## License
 

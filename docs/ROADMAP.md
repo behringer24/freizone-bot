@@ -487,3 +487,46 @@ reply**, and an **HTTP request** whose answer becomes the reply.
   Loud about doing nothing: declared actions with no `FREIZONE_BOT_COMMANDERS`
   are a configuration that cannot be reached at all, so that combination warns
   at startup instead of coming up looking fine.
+
+### BOT-13 — The build CI never did
+Status: `done`
+
+- 2026-08-21 — the release image build for `v0.1.0` failed on `COPY go.mod
+  go.sum`: **there was no `go.sum` in this repo, and never had been.**
+
+  The cause was a decision that was right and a consequence that was missed.
+  `pkg/client` was changing alongside this repo, so builds resolved it through a
+  gitignored `go.work` pointing at a freizone-server checkout next door —
+  deliberately not a `replace` in `go.mod`, since that travels with the
+  repository and would have had CI compile against whichever branch happened to
+  be sitting there. What went unnoticed is that **a workspace keeps its hashes
+  in `go.work.sum`**, so `go.sum` was never generated, and the first thing that
+  ever needed one was the release image build. In public, on a tag.
+
+  One step behind it, a second failure was waiting: `go.mod` named
+  freizone-server `v0.22.0`, which predates `SRV-30` and `SRV-31` and therefore
+  half the API this bot calls. Fixing `go.sum` alone would have moved the error
+  from Dockerfile line 5 to line 8.
+
+  Both are one root cause: **a local build and a CI build that were not the same
+  build**, with nothing running the second one until a release. This repo had no
+  workflow that compiled or tested anything — only publish-on-tag. So did
+  freizone-server and freizone-gateway, but neither depends on a sibling
+  checkout, so their standalone build gets exercised locally every day. This was
+  the first repo in the family where the two diverged, which is why it bit here
+  first and why it bit at the worst moment.
+
+  Fixed: `go.mod` names `v0.23.0`, `go.sum` is committed, `go.work` is gone, and
+  `.github/workflows/ci.yml` runs the standalone build on every push — download,
+  verify, `tidy -diff`, gofmt, vet, build, `test -race`. Verified by doing the
+  thing that had failed rather than reasoning about it: the image builds locally
+  and its entrypoint answers.
+
+  A diagnosis worth recording, because I got it wrong first: the module proxy
+  answered `unknown revision v0.23.0` and I concluded the tag had not been
+  pushed. It had. `proxy.golang.org` negative-caches a version asked for before
+  it existed — and my own earlier attempt to name that version is what put it
+  there. `git ls-remote` could not correct me because `origin` is an SSH remote
+  and this environment holds no key, so the only evidence I had was the stale
+  cache. A plain HTTPS `GET .../@v/v0.23.0.info` needs no credentials and would
+  have answered the question directly.
