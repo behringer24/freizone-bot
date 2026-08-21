@@ -22,6 +22,7 @@ import (
 	"github.com/behringer24/freizone-bot/internal/command"
 	"github.com/behringer24/freizone-bot/internal/config"
 	"github.com/behringer24/freizone-bot/internal/control"
+	"github.com/behringer24/freizone-bot/internal/declared"
 	"github.com/behringer24/freizone-bot/internal/ipc"
 	"github.com/behringer24/freizone-bot/internal/outbound"
 	"github.com/behringer24/freizone-bot/internal/outbox"
@@ -143,8 +144,18 @@ func runDaemon(args []string) error {
 		if err != nil {
 			return err
 		}
+		// Read before anything is registered, so a typo in the file stops the
+		// daemon here rather than surfacing as one broken command the first time
+		// somebody in a chat tries it.
+		declarations, err := declared.Load(cfg.ActionsFile)
+		if err != nil {
+			return err
+		}
 		d.actions = action.NewRegistry()
 		action.RegisterBuiltins(d.actions, d.statusLine, jokes)
+		if err := declared.Register(d.actions, declarations, declared.Client()); err != nil {
+			return err
+		}
 		// The parser is built from the same specs a model-driven interpreter
 		// would render as tool definitions -- which is the check that those
 		// specs are a sufficient description of an action.
@@ -152,9 +163,18 @@ func runDaemon(args []string) error {
 		logger.Info("command surface enabled",
 			"commanders", d.policy.Commanders(),
 			"group_commands", cfg.AllowGroupCommands,
-			"actions", len(d.actions.Specs()))
+			"actions", len(d.actions.Specs()),
+			"declared", len(declarations))
 	} else {
 		logger.Info("command surface disabled: no FREIZONE_BOT_COMMANDERS configured")
+		// A file full of declared actions and no allow-list is a configuration
+		// that does exactly nothing, and does it quietly. Said out loud, because
+		// the person who wrote that file is expecting the opposite.
+		if cfg.ActionsFile != "" {
+			logger.Warn("declared actions will not be reachable: "+
+				"the command surface is off, so nobody can call them",
+				"file", cfg.ActionsFile)
+		}
 	}
 
 	ctrl := control.New(ln, version, logger, map[string]control.Handler{

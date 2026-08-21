@@ -183,6 +183,7 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_COMMANDERS` | – (off) | Comma-separated account ids that may command the bot. **Empty disables the command surface entirely** — the bot will not answer anybody. Deliberately not "whoever is in the group": group membership changes without you being told, a configured list changes when you change it. |
 | `FREIZONE_BOT_ALLOW_GROUP_COMMANDS` | `false` | Whether commands may be given in a group. Off by default: a command in a group is visible to everyone in it, its answer is too, and the membership drifts. With it off the bot takes instructions only in a one-to-one chat. |
 | `FREIZONE_BOT_JOKES_FILE` | – | One joke per line (`#` comments and blank lines ignored) for the `/joke` action, replacing the small built-in set. |
+| `FREIZONE_BOT_ACTIONS_FILE` | – | Actions declared in a JSON file instead of in Go: a fixed reply, or an HTTP request whose answer becomes the reply. See [Teaching it new commands](#teaching-it-new-commands). Only reachable once `FREIZONE_BOT_COMMANDERS` names somebody — a declarations file with no allow-list reaches nobody at all, so that combination warns at startup rather than coming up looking fine. |
 | `FREIZONE_BOT_DEDUP_WINDOW_MINUTES` | `0` (off) | Collapses repeats of the same message within this many minutes: something that flaps every thirty seconds arrives once and then carries a count. Two messages are "the same" by title and labels — deliberately **not** the body, which routinely carries a timestamp or a measurement that differs every time while the thing being reported plainly does not. Pass `-dedup-key` to decide it yourself. Off by default because deciding two messages are one event is a judgement whatever produced them is usually better placed to make. |
 | `FREIZONE_BOT_MAX_AGE_MINUTES` | `60` | How long an undelivered message keeps being retried before it is dropped. An alert delivered six hours late is noise. The drop is logged at error level naming the message and its destination — a silent one would be a lie about a channel somebody is relying on. |
 | `FREIZONE_BOT_RATE_PER_MINUTE` | `20` | A hard ceiling on messages leaving per minute, with the excess collapsed into one "N further messages suppressed" line. Without it, one flapping service turns the bot into a denial of service on your own phone — and on your own server, whose per-device queue is bounded and starts refusing at 1000. |
@@ -230,6 +231,106 @@ is why every recipient is parsed when the configuration is read:
   kept. In a federated namespace an id alone does not identify anybody.
 - one bad entry fails the whole list. A bot that came up with three of four
   recipients would page three people and look like it was working.
+
+## Teaching it new commands
+
+Without recompiling: `FREIZONE_BOT_ACTIONS_FILE` points at a JSON file of
+declared actions. Two kinds.
+
+**A fixed reply.** Nothing is executed, so this adds no attack surface at all —
+and it covers more than it sounds like it does: rotas, runbook links, canned
+answers, anything somebody currently has to remember.
+
+```json
+[
+  {
+    "name": "oncall",
+    "summary": "who is carrying the pager",
+    "reply": "This week: Andreas. Next: Marek.\nRota: https://wiki.example.org/oncall"
+  },
+  {
+    "name": "greet",
+    "summary": "say hello to somebody",
+    "params": [{ "name": "who", "required": true, "pattern": "^[a-zA-Z ]{1,40}$" }],
+    "reply": "Hello {{who}}, welcome."
+  }
+]
+```
+
+**An HTTP request**, whose answer becomes the reply. The logic stays in the
+system that already has it — a CI server, a runbook service, a home-automation
+box — and the bot holds a URL and a token rather than a shell.
+
+```json
+[
+  {
+    "name": "deploys",
+    "summary": "the last few deploys",
+    "params": [{ "name": "count", "pattern": "^[0-9]{1,2}$" }],
+    "request": {
+      "url": "https://ci.example.org/api/deploys?limit={{count}}",
+      "headers": { "Accept": "application/json" },
+      "tokenFile": "/run/secrets/ci-token",
+      "field": "result.items",
+      "timeoutSeconds": 10
+    }
+  }
+]
+```
+
+Commands are still off until `FREIZONE_BOT_COMMANDERS` names somebody — a
+declarations file on its own reaches nobody, and the daemon says so at startup
+rather than coming up looking fine.
+
+### Does the endpoint have to answer in a particular format?
+
+**No.** Requiring one would have undone the point: an endpoint written for this
+bot is an endpoint somebody had to write for this bot, which is barely better
+than recompiling. So the bot takes what arrives.
+
+| What comes back | What reaches the chat |
+| --- | --- |
+| `text/plain` | the body, trimmed |
+| JSON string | the string |
+| JSON object | sorted `key=value` lines — the same way labels are rendered |
+| JSON list | one line per entry; a list of objects collapses each onto one line |
+| any JSON, with `field` set | whatever that dotted path selects |
+| a non-2xx status | a failure, not a reply: `503 Service Unavailable: upstream is down` |
+| HTML, an image, a blob | described, not pasted: status, type, size |
+
+`field` is for when the interesting part is buried. Everything else needs
+nothing from the other side.
+
+Two of those rows are refusals rather than renderings, and both are deliberate.
+An HTML error page is the **likeliest** thing a misconfigured endpoint returns,
+and one pasted into a group transcript cannot be un-sent. Long answers are cut
+at 25 lines or 2000 characters and **say** they were cut — a truncated list that
+looks complete is worse than a short one, particularly for a list somebody is
+checking against.
+
+The answer arrives with the action's name in front of it. That is not
+decoration: the text below it was written by another system, an endpoint that
+reflects any of its input is one an outsider can write through, and without that
+line a group member cannot tell what the bot *found* from what the bot is
+*saying*.
+
+### What a declaration cannot do
+
+**Run a command.** There is no `"exec"`, and `"restart": "systemctl restart
+nginx"` is the obvious third kind that is not here. A shell string in a
+configuration file is remote code execution for anybody who gets a message past
+the allow-list, and it would arrive looking like a convenience feature. Anything
+that has to run on this host belongs behind an endpoint that decides for itself
+whether to do it — the same boundary you would want anyway, and one the request
+kind above already reaches.
+
+Two things the request kind will not do either. A parameter cannot move a
+request somewhere else: values are percent-encoded going in, *and* the filled-in
+URL has to still resolve to the scheme and host the file named — checked again
+on redirects, which are capped at three and refused across hosts. A bot sits
+inside a network and carries a token, so where its requests go is worth two
+locks rather than one. And a `pattern` is anchored even when written unanchored,
+because `[0-9]+` on its own matches a substring and would accept `12; and more`.
 
 ## Development
 

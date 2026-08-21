@@ -406,3 +406,84 @@ Status: `planned`
 An alerting bot's transcript grows without bound with content nobody will read.
 `ClearTranscript` already exists in `pkg/client`; the retention policy belongs
 here. Filed early because it is the kind of thing noticed when a disk fills.
+
+### BOT-12 — Actions an operator can declare
+Status: `done`
+
+Adding a command meant editing `internal/action/builtin.go` and rebuilding,
+which is honest for a Go binary and useless to the person actually running one.
+Two declarable kinds in a JSON file (`FREIZONE_BOT_ACTIONS_FILE`): a **fixed
+reply**, and an **HTTP request** whose answer becomes the reply.
+
+- 2026-08-21 — **done**, `internal/declared`. The kinds were chosen by what they
+  cost rather than by what they enable. A fixed reply executes nothing, so it
+  adds no attack surface at all and covers more than it sounds like it does --
+  rotas, runbook links, canned answers. A request reaches out of the machine but
+  reaches something that *already decides for itself* whether to act, so the bot
+  holds a URL and a token instead of a shell.
+
+  **Not built, and this is the decision the item exists to record:**
+  `restart=systemctl restart nginx` in a configuration file. It is the obvious
+  third kind, it is what everybody asks for, and it is remote code execution for
+  anybody who gets a message past the allow-list -- arriving dressed as a
+  convenience feature. Anything that has to run on the host belongs behind an
+  endpoint, which is the same boundary an operator would want anyway and which
+  the request kind already reaches.
+
+  **A declared action is still a registered action**: closed set, `Spec`,
+  parameters validated by `Registry.Execute`. So nothing here widens what an
+  interpreter can reach, and `BOT-10` inherits the narrowing for free -- the
+  patterns hold for a model's output because a model also goes through `Execute`.
+  Requests set `Sensitive`, which had existed since `BOT-05` with nothing setting
+  it; a fixed reply does not, since it changes nothing.
+
+  Two guards on a URL rather than one. Parameters are percent-encoded going in,
+  *and* the filled URL has to still resolve to the scheme and host the file
+  named -- checked again on redirects, capped at three. A bot sits inside a
+  network and carries a token, so being made to fetch a URL of the caller's
+  choosing is the thing worth two locks. Patterns on parameters are anchored even
+  when written unanchored, because `[0-9]+` unanchored accepts `12; and more`,
+  which is not what anybody writing a pattern means. A failing pattern is *not*
+  quoted back to the sender: it is a regular expression, they are in a chat
+  window, and it would amount to advice on how to construct something that
+  passes.
+
+- 2026-08-21 — **the response format, which was the open question.** An endpoint
+  needs none. Requiring one would have undone the point: an endpoint written for
+  this bot is an endpoint somebody had to write for this bot, which is barely
+  better than recompiling. So text is the reply as it stands, JSON is decomposed
+  by shape (a string is itself; a list becomes one line per entry; an object
+  becomes sorted `key=value` lines, the same rendering labels already get), and
+  `field` narrows to a dotted path when the interesting part is buried. Sorted,
+  because Go's map order would otherwise reshuffle an unchanged answer and make
+  the deduplicator treat two identical things as different.
+
+  Two things it refuses rather than renders. A non-2xx is a failure, not a reply,
+  and its body is shown only when small and textual -- an HTML error page is the
+  *likeliest* thing a misconfigured endpoint returns, and one pasted into a group
+  transcript cannot be un-sent. HTML or binary with a 200 gets described, not
+  pasted: status, type, size.
+
+  The answer carries the action's name in front of it. Not decoration: that text
+  was written by another system, an endpoint reflecting its input is one an
+  outsider can write through, and without a line saying where it came from a
+  group member cannot tell what the bot *found* from what the bot is *saying*.
+
+  **A bug my own test found**, worth writing down because the shape recurs: a
+  list rendered `LineLimit` entries plus an `… and N more` line, and then the
+  outer size cap trimmed the last line to get back under the limit -- throwing
+  away precisely the line that said what had been dropped. Two truncations in
+  sequence, the second silently undoing the first one's honesty. The inner cap is
+  one line short now, for that reason and with the reason written next to it.
+
+  Also caught while writing tests: three separate URL mistakes were being
+  reported as whichever check ran first, so `file:///etc/passwd` came back as
+  "names no host" and a bare path as "is not http or https". Each has its own
+  sentence now. And a declared name colliding with a built-in used to reach
+  `Registry.Register`, which *panics* on a duplicate -- right for a wiring
+  mistake in Go, wrong for a name somebody typed in a file. It is a refusal to
+  start with one sentence now, not a stack trace.
+
+  Loud about doing nothing: declared actions with no `FREIZONE_BOT_COMMANDERS`
+  are a configuration that cannot be reached at all, so that combination warns
+  at startup instead of coming up looking fine.
