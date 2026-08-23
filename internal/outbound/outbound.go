@@ -271,6 +271,19 @@ func Resolve(cfg *config.Config, groupID, route string, labels map[string]string
 		}
 	}
 	if wantGroup && groupID != "" {
+		// A prefix that has not been resolved is not a destination. Queued as
+		// one it produced a message that could never be delivered -- every
+		// attempt failing with "no facts about group <prefix>" until the
+		// maximum age dropped it, and `send` reporting success the whole time.
+		// Refused here instead, so the caller hears about it on the call that
+		// cannot work rather than an hour later in a log nobody is reading.
+		if _, err := address.Normalize(groupID); err != nil {
+			return nil, fmt.Errorf(
+				"%w: the configured group %q is a prefix this bot cannot yet resolve -- "+
+					"it is in no group whose id starts with it, so either the id is wrong or "+
+					"the invitation has not arrived",
+				ErrNoRoute, groupID)
+		}
 		out = append(out, Destination{Kind: KindGroup, ID: groupID})
 	}
 	if wantPeers {

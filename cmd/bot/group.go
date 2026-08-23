@@ -69,8 +69,13 @@ func (d *daemon) resolveGroup() error {
 
 	switch len(matches) {
 	case 0:
-		d.logger.Info("the configured group is not one this bot has joined yet",
-			"configured", want)
+		// Warn rather than inform, and name what *was* found. Nothing else
+		// prints the groups this bot is in, so an operator whose configured id
+		// is simply wrong had no way to see the right one -- and the symptom is
+		// every send failing with "no facts about group <prefix>", which reads
+		// like a broken group rather than a mistyped setting.
+		d.logger.Warn("the configured group is not one this bot is in: nothing will be delivered to it",
+			"configured", want, "groups_this_bot_is_in", ids)
 	case 1:
 		d.groupID = matches[0]
 		if matches[0] != want {

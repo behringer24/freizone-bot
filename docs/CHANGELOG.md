@@ -14,6 +14,14 @@ Releases are cut as annotated git tags.
 
 ### Fixed
 
+* **An unresolved group prefix is no longer used as a destination (`BOT-16`).**
+  A prefix the bot cannot resolve -- because it is in no group whose id starts
+  with it -- was queued as a destination anyway, so every send failed with
+  "no facts about group <prefix>" and retried until the maximum age dropped it,
+  while `send` reported success. It is refused as a missing route now. And the
+  startup warning lists the groups the bot **is** in, since nothing else printed
+  them and an operator with a wrong id had no way to find the right one.
+
 * **`FREIZONE_BOT_COMMANDERS` accepts every spelling, and a prefix is refused
   with the reason (`BOT-16`).** The allow-list held whatever was written and
   compared it against the canonical account id the receive path reports, so the

@@ -881,3 +881,25 @@ Status: `done`
   happens to send something, so a prefix there would authorise everybody whose id
   begins with it. Five characters of a bech32 id is not an authorisation decision
   anybody means to make, and the error says so.
+
+- 2026-08-23 — **two defects the field found within the hour**, both mine, both
+  from the same half-finished thought.
+
+  I had written that an unresolvable group prefix is "not an error -- the
+  invitation path resolves it", and then let the unresolved prefix be used as a
+  **destination** anyway. So every send queued against `group:p5stj` and failed
+  with `client: no facts about group p5stj`, thirteen attempts deep, while `send`
+  had reported success each time. The message would have died at the maximum age
+  with nothing but a log line about it. `Resolve` refuses it now, as `ErrNoRoute`,
+  with an error that separates the two causes because the fix differs: either the
+  id is wrong or the invitation has not arrived.
+
+  And the no-match case logged at info and named only what was *configured* --
+  while **nothing in this bot prints the groups it is actually in**. So an
+  operator whose configured id was simply wrong had no way to see the right one,
+  and the symptom read like a broken group rather than a mistyped setting. It
+  warns now, and lists the groups the bot holds.
+
+  The pattern is worth naming, because it is the third time: I made a decision
+  about the *good* path ("a prefix resolves") and left the path where it does not
+  resolve running on the same rails.
