@@ -14,6 +14,14 @@ Releases are cut as annotated git tags.
 
 ### Fixed
 
+* **A configured server that disagrees with the account's own is refused
+  (`BOT-17`).** An account belongs to the server it was registered on -- its
+  address is `id*server` and its keys are published there -- so pointing
+  `FREIZONE_BOT_SERVER` somewhere else is not a change the bot can carry out. It
+  used to be ignored: the stored server was used and the start logged
+  `account ready`, at the exact moment somebody was trying to work out why
+  nothing arrived. Now it stops, names both servers, and says the two ways out
+
 * **Every spelling of a Freizone address is accepted, for groups as well as
   accounts (`BOT-16`).** The whole id, the hyphenated display form, the short
   prefix from the app's compact rendering, upper case, with `*server`, with

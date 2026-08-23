@@ -834,3 +834,29 @@ Status: `done`
   `pkg/address` as a `VersionMarkerOf`, and a test pins the current behaviour so
   that adding it makes this repository's tests fail rather than quietly leaving
   the gap open.
+
+### BOT-17 — A changed server was silently ignored
+Status: `done`
+
+- 2026-08-23 — an admin on `chat.behringer24.de` tried to invite the bot as
+  `qk86f*chatcentral.de` and got a 404. The address was not the problem: that
+  account was registered on a **local test instance**, and chatcentral.de had
+  never heard of it. The 404 was correct.
+
+  What made it hard to get out of is the part worth fixing. `EnsureRegistered`
+  returned a stored identity without comparing its server to the configured one,
+  so pointing `FREIZONE_BOT_SERVER` at the intended server and restarting logged
+  `account ready` and carried on talking to the old one. A configuration change
+  that is silently ignored, at the exact moment somebody is trying to work out
+  why nothing arrives.
+
+  It now refuses to start, naming both servers and both ways out: an account
+  cannot move between servers -- its address *is* `id*server` and its keys are
+  published there -- so either the original server goes back, or a fresh state
+  directory registers a second account on the new one, which gets a new address
+  and has to be invited again. `SameServer` does the comparison, so adding or
+  dropping the default scheme is not mistaken for a move.
+
+  Verified live against a copy of a real account directory, both ways: the
+  refusal fires on a genuinely different server, and does not fire when the same
+  server is spelled without its scheme.
