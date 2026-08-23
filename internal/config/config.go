@@ -288,9 +288,16 @@ func (c *Config) validate() error {
 		return fmt.Errorf("%s is set but %s is not, so nothing is listening for those senders", envWebhookTokens, envWebhookAddr)
 	}
 
-	if _, err := ParseGroupID(c.RouteGroup); err != nil {
+	// Stored, not just checked. The parsed form is what the rest of the bot
+	// compares and sends to, and the raw form is whatever spelling somebody
+	// pasted -- hyphenated, upper case, with a server appended. Discarding the
+	// result here, which is what this line used to do, meant validating one
+	// value and then using another.
+	groupID, err := ParseGroupID(c.RouteGroup)
+	if err != nil {
 		return fmt.Errorf("%s: %w", envRouteGroup, err)
 	}
+	c.RouteGroup = groupID
 	if _, err := ParsePeers(c.RoutePeers); err != nil {
 		// Checked here so a typo in an environment file fails at startup rather
 		// than at the first message -- which is the worst possible moment to

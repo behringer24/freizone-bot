@@ -31,7 +31,7 @@ func cfgWith(t *testing.T, group string, peers string) *config.Config {
 // a message goes to both, which is how escalation is expressed -- the team
 // channel *and* whoever is carrying the pager.
 func TestBothRoutesReceiveByDefault(t *testing.T) {
-	dests, err := Resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", "qlfxcdsa42x4xe4gwjcnu,qu0qmxckqmum0dv77pndv"), "", nil)
+	dests, err := resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", "qlfxcdsa42x4xe4gwjcnu,qu0qmxckqmum0dv77pndv"), "", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestBothRoutesReceiveByDefault(t *testing.T) {
 func TestOneRouteCanBeNamed(t *testing.T) {
 	cfg := cfgWith(t, "plfxcdsa42x4xe4zr2mju", "qlfxcdsa42x4xe4gwjcnu,qu0qmxckqmum0dv77pndv")
 
-	onlyGroup, err := Resolve(cfg, RouteGroup, nil)
+	onlyGroup, err := resolve(cfg, RouteGroup, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestOneRouteCanBeNamed(t *testing.T) {
 		t.Errorf("want just the group, got %+v", onlyGroup)
 	}
 
-	onlyPeers, err := Resolve(cfg, RoutePeers, nil)
+	onlyPeers, err := resolve(cfg, RoutePeers, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestOneRouteCanBeNamed(t *testing.T) {
 // A typo in a route name has to be refused rather than quietly sending
 // everywhere, or nowhere.
 func TestAnUnknownRouteIsRefused(t *testing.T) {
-	_, err := Resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", ""), "oncall", nil)
+	_, err := resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", ""), "oncall", nil)
 	if err == nil {
 		t.Fatal("an unknown route must be refused")
 	}
@@ -78,14 +78,14 @@ func TestAnUnknownRouteIsRefused(t *testing.T) {
 // Naming a route that exists as a name but has nothing configured is its own
 // case: the operator asked for something specific and it is not set up.
 func TestANamedRouteWithNothingConfiguredIsRefused(t *testing.T) {
-	_, err := Resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", ""), RoutePeers, nil)
+	_, err := resolve(cfgWith(t, "plfxcdsa42x4xe4zr2mju", ""), RoutePeers, nil)
 	if err == nil {
 		t.Fatal("asking for the peer route with no peers configured must be refused")
 	}
 }
 
 func TestNoRouteAtAllIsRefused(t *testing.T) {
-	if _, err := Resolve(cfgWith(t, "", ""), "", nil); err == nil {
+	if _, err := resolve(cfgWith(t, "", ""), "", nil); err == nil {
 		t.Fatal("a message with nowhere to go must be refused")
 	}
 }
@@ -192,4 +192,11 @@ func TestOneSuppressedMessageReadsAsSingular(t *testing.T) {
 	if !strings.Contains(note, "1 further message was suppressed") {
 		t.Errorf("got %q", note)
 	}
+}
+
+// resolve is Resolve with the group id already resolved, which is what the
+// daemon passes. These tests configure whole ids, so a resolved id is the
+// configured one -- the prefix case is the daemon's and is tested there.
+func resolve(cfg *config.Config, route string, labels map[string]string) ([]Destination, error) {
+	return Resolve(cfg, cfg.RouteGroup, route, labels)
 }

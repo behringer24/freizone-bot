@@ -9,38 +9,44 @@ import (
 
 // Reading recipients out of configuration.
 //
-// The address format itself -- `id*server`, the local form, scheme defaulting,
-// what counts as one server -- lives in `pkg/address` (SRV-31). This file holds
-// only what is the *bot's* rule rather than the format's, and the difference is
-// worth keeping visible: this package once had its own parser, written from the
-// format's description, and it disagreed with the app's in four places inside a
-// day. One of those disagreements silently routed `*local` nowhere.
+// # Every spelling, everywhere
 //
-// What belongs here: recipients must be complete (never a prefix), an account
-// where an account is meant, a group where a group is meant, no duplicates, and
-// a list that is all or nothing.
+// A Freizone address has several written forms, and **all of them are accepted
+// here** -- the full 21-character id, the hyphenated form the app displays, the
+// short prefix from the app's compact `shortid*domain` rendering, any of those
+// with `*server`, with `*local`, with a bare trailing `*`, or with no server
+// part at all. For accounts and for groups alike.
+//
+// This file used to require the full checksummed id, on the reasoning that
+// configuration is not typed under pressure so a truncated id should fail rather
+// than resolve to whoever happens to match. That was wrong twice over. It is
+// wrong in principle, because every one of those forms is one the *app displays*
+// and therefore one a person will copy -- so refusing any of them means the form
+// most likely to be pasted is the one that does not work. And it is wrong in
+// fact, because completing a prefix is not guessing: `Client.ResolvePeer` has the
+// server complete it and then verifies the returned id against the returned root
+// key, and a group prefix resolves against the groups this bot already holds.
+//
+// What genuinely needs refusing is an **ambiguous** prefix -- two things
+// matching -- and that refusal has to name both. Resolution happens where the
+// information is, which is in the daemon with an open account, not here.
+//
+// # What this file still decides
+//
+// Only what remains the bot's own rule: an account belongs in the peer route and
+// a group in the group route (checkable on a prefix too, since the first
+// character is the version marker), no duplicate recipients, and a list is
+// all-or-nothing.
 
-// ParsePeer reads one configured recipient.
-//
-// Strict on purpose. `pkg/address.Parse` accepts a prefix because interactive
-// completion needs it; configuration is not typed under time pressure, and a
-// truncated id in an environment file resolving to whoever happens to match is
-// how a message reaches a stranger.
+// ParsePeer reads one configured recipient, in any spelling. The returned ID may
+// be a prefix; the core resolves it when the message is sent.
 func ParsePeer(raw string) (address.Address, error) {
-	peer, err := address.ParseFull(raw)
+	peer, err := address.Parse(raw)
 	if err != nil {
 		return address.Address{}, fmt.Errorf("%q is not a Freizone address: %w", strings.TrimSpace(raw), err)
 	}
-
-	// An account id and a group id differ by a single version marker, so a
-	// group listed as a peer would be addressed as a person and fail somewhere
-	// far away from the line that got it wrong.
-	version, err := address.VersionOf(peer.ID)
-	if err != nil {
-		return address.Address{}, fmt.Errorf("%q has no readable version marker: %w", raw, err)
-	}
-	if version == address.VersionGroup {
-		return address.Address{}, fmt.Errorf("%q is a group id, not an account -- a group belongs in the group route", peer.ID)
+	if err := mustBe(peer.ID, false); err != nil {
+		return address.Address{}, err
 	}
 	return peer, nil
 }
@@ -56,17 +62,13 @@ func ParsePeers(raw []string) ([]address.Address, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Refused rather than quietly collapsed: a repeated recipient would be
-		// sent to twice, and the likelier reading of a duplicate is that one of
-		// the two entries was meant to name somebody else.
-		//
-		// Compared with SameServer rather than by rendered string, because the
-		// scheme is how this bot happens to reach a server and not part of its
-		// identity -- so `id*example.org` and `id*http://example.org` are one
-		// recipient, and a string comparison would send to them twice.
 		for _, seen := range out {
-			if seen.ID == peer.ID && address.SameServer(seen.Server, peer.Server) {
-				return nil, fmt.Errorf("%s is listed twice", peer)
+			if sameRecipient(seen, peer) {
+				// Refused rather than quietly collapsed: a repeated recipient
+				// would be delivered to twice, and the likelier reading of a
+				// duplicate is that one of the two entries was meant to name
+				// somebody else.
+				return nil, fmt.Errorf("%s and %s are the same recipient", seen, peer)
 			}
 		}
 		out = append(out, peer)
@@ -74,31 +76,69 @@ func ParsePeers(raw []string) ([]address.Address, error) {
 	return out, nil
 }
 
-// ParseGroupID checks a configured group id.
+// sameRecipient compares two configured recipients across spellings.
 //
-// A group is not reached through a server the way an account is -- its id is
-// derived from its own root key -- so this takes an id and not an address, and
-// says so if it is given one.
+// One id being a prefix of the other counts as the same, because that is what it
+// is -- a comparison by equality would let the compact form and the full id
+// through as two people and deliver twice. SameServer rather than a string
+// comparison for the same reason on the other half: the scheme is how this bot
+// reaches a server, not part of who lives there.
+func sameRecipient(a, b address.Address) bool {
+	if !address.SameServer(a.Server, b.Server) {
+		return false
+	}
+	return strings.HasPrefix(a.ID, b.ID) || strings.HasPrefix(b.ID, a.ID)
+}
+
+// ParseGroupID reads a configured group, in any spelling.
+//
+// A server part is accepted and discarded rather than refused: a group is not
+// reached through a server -- its id derives from its own root key -- but the
+// compact form the app displays carries one, and that form is exactly what
+// somebody copies. Refusing it taught nothing and cost a restart.
+//
+// The returned id may be a prefix. The daemon resolves it against the groups it
+// holds; see cmd/bot.
 func ParseGroupID(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
-	if strings.Contains(raw, "*") {
-		return "", fmt.Errorf("%q looks like an address: a group is not reached through a server, so its id stands alone", raw)
-	}
-	id, err := address.Normalize(raw)
+	parsed, err := address.Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("%q is not a Freizone id: %w", raw, err)
 	}
+	if err := mustBe(parsed.ID, true); err != nil {
+		return "", err
+	}
+	return parsed.ID, nil
+}
+
+// mustBe checks the kind of thing an id names: an account belongs in the peer
+// route, a group in the group route, and they differ in one character.
+//
+// Only a **full** id is checked. The version marker is the first character, so a
+// prefix could be checked too -- but `address.VersionOf` normalises before
+// reading it and therefore insists on all 21. Re-deriving the marker here would
+// mean copying the charset into this repository, which is precisely what SRV-31
+// stopped: the address format has one home. So a prefix passes here and is
+// caught when it is resolved instead -- at startup for a group, at the first
+// send for a peer.
+//
+// The proper fix is a `VersionMarkerOf` in `pkg/address` that reads the marker
+// without validating the rest. Then this becomes one call again and the check
+// covers every spelling.
+func mustBe(id string, group bool) error {
 	version, err := address.VersionOf(id)
 	if err != nil {
-		return "", fmt.Errorf("%q has no readable version marker: %w", raw, err)
+		return nil //nolint:nilerr // a prefix, checked at resolution -- see above
 	}
-	// The likelier of the two mistakes: the ids look alike and only the first
-	// character differs.
-	if version != address.VersionGroup {
-		return "", fmt.Errorf("%q is an account id, not a group id -- a group route needs a group", raw)
+	isGroup := version == address.VersionGroup
+	switch {
+	case group && !isGroup:
+		return fmt.Errorf("%q is an account id, not a group id -- a group route needs a group", id)
+	case !group && isGroup:
+		return fmt.Errorf("%q is a group id, not an account -- a group belongs in the group route", id)
 	}
-	return id, nil
+	return nil
 }

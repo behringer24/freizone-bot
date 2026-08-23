@@ -34,7 +34,7 @@ func cfgRouted(t *testing.T, severityRoutes string) *config.Config {
 func TestSeverityDecidesWhoIsWoken(t *testing.T) {
 	cfg := cfgRouted(t, "severity:critical=group+peers,severity:warning=group")
 
-	critical, err := Resolve(cfg, "", sev("critical"))
+	critical, err := resolve(cfg, "", sev("critical"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestSeverityDecidesWhoIsWoken(t *testing.T) {
 		t.Errorf("critical should reach the group and both peers, got %+v", critical)
 	}
 
-	warning, err := Resolve(cfg, "", sev("warning"))
+	warning, err := resolve(cfg, "", sev("warning"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestSeverityDecidesWhoIsWoken(t *testing.T) {
 // mapping at all. Silently dropping an unmapped severity would be the worst
 // possible reading of a partial configuration.
 func TestAnUnmappedSeverityStillGoesEverywhere(t *testing.T) {
-	dests, err := Resolve(cfgRouted(t, "severity:critical=peers"), "", sev("notice"))
+	dests, err := resolve(cfgRouted(t, "severity:critical=peers"), "", sev("notice"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestAnUnmappedSeverityStillGoesEverywhere(t *testing.T) {
 
 // Case should not decide whether somebody gets woken up.
 func TestSeverityMatchingIgnoresCase(t *testing.T) {
-	dests, err := Resolve(cfgRouted(t, "severity:critical=peers"), "", sev("CRITICAL"))
+	dests, err := resolve(cfgRouted(t, "severity:critical=peers"), "", sev("CRITICAL"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSeverityMatchingIgnoresCase(t *testing.T) {
 // out of the ordinary on purpose, and configuration overriding that would make
 // the flag a suggestion.
 func TestAnExplicitRouteOverridesTheMapping(t *testing.T) {
-	dests, err := Resolve(cfgRouted(t, "severity:critical=group"), RoutePeers, sev("critical"))
+	dests, err := resolve(cfgRouted(t, "severity:critical=group"), RoutePeers, sev("critical"))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestAMappingToAnUnconfiguredRouteSaysWhichToFix(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 
-	_, err = Resolve(cfg, "", sev("critical"))
+	_, err = resolve(cfg, "", sev("critical"))
 	if err == nil {
 		t.Fatal("a severity routed nowhere reachable must be refused")
 	}
@@ -287,7 +287,7 @@ func sev(s string) map[string]string { return map[string]string{LabelSeverity: s
 func TestRoutingWorksOnAnyLabel(t *testing.T) {
 	cfg := cfgRouted(t, "kind:digest=group,repo:freizone-app=peers")
 
-	digest, err := Resolve(cfg, "", map[string]string{"kind": "digest"})
+	digest, err := resolve(cfg, "", map[string]string{"kind": "digest"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestRoutingWorksOnAnyLabel(t *testing.T) {
 		t.Errorf("a daily digest belongs in the group, got %+v", digest)
 	}
 
-	build, err := Resolve(cfg, "", map[string]string{"repo": "freizone-app"})
+	build, err := resolve(cfg, "", map[string]string{"repo": "freizone-app"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestTheFirstMatchingRuleWins(t *testing.T) {
 	cfg := cfgRouted(t, "kind:digest=group,severity:critical=peers")
 
 	// Carries both labels; the digest rule comes first.
-	dests, err := Resolve(cfg, "", map[string]string{"kind": "digest", "severity": "critical"})
+	dests, err := resolve(cfg, "", map[string]string{"kind": "digest", "severity": "critical"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}

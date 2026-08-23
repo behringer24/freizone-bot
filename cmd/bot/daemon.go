@@ -137,6 +137,7 @@ func runDaemon(args []string) error {
 		started:          time.Now(),
 		acceptInvitation: c.AcceptGroupInvitation,
 		membershipOf:     c.GroupMembership,
+		knownGroups:      c.Groups,
 		id:               id,
 	}
 
@@ -201,6 +202,11 @@ func runDaemon(args []string) error {
 
 	// Before the loops: an invitation may have been waiting on disk since a run
 	// that had no group configured, and nothing will announce it again.
+	// Before either: a configured prefix has to become a whole group id, or the
+	// catch-up below would look for a group under a name nothing is stored as.
+	if err := d.resolveGroup(); err != nil {
+		return err
+	}
 	d.joinConfiguredGroupIfInvited(ctx)
 
 	upkeepDone := runUpkeep(ctx, d, upkeepWanted)
@@ -209,7 +215,7 @@ func runDaemon(args []string) error {
 
 	logger.Info("bot started",
 		"account", id.AccountID, "server", id.Server,
-		"route_group", cfg.RouteGroup, "route_peers", len(cfg.RoutePeers),
+		"route_group", d.configuredGroup(), "route_peers", len(cfg.RoutePeers),
 		"control_socket", cfg.ControlSocket,
 	)
 
@@ -267,6 +273,14 @@ type daemon struct {
 	// membershipOf reads a group's resolved fact set, injectable for the same
 	// reason: what is worth testing is the catch-up decision, not the fold.
 	membershipOf func(groupID string) (*group.Resolved, error)
+
+	// knownGroups lists the groups this bot holds, for resolving a configured
+	// prefix into a whole group id. Injectable for the same reason again.
+	knownGroups func() ([]string, error)
+
+	// groupID is the resolved full id of the configured group, empty until it is
+	// known -- see group.go. Read through configuredGroup(), never directly.
+	groupID string
 
 	// The inbound half. Nil interpreter means no command surface is configured,
 	// which is the default -- see internal/authz on why that fails closed.
@@ -353,7 +367,7 @@ type accepted struct {
 // would be the fourth. There is nothing to keep in step because there is one
 // path.
 func (d *daemon) accept(msg outbound.Message, route, dedupKey string) (accepted, error) {
-	dests, err := outbound.Resolve(d.cfg, route, msg.Labels)
+	dests, err := outbound.Resolve(d.cfg, d.configuredGroup(), route, msg.Labels)
 	if err != nil {
 		return accepted{}, err
 	}
@@ -423,12 +437,16 @@ func (d *daemon) onReceived(ctx context.Context, res client.ReceiveResult) {
 // we already hold, rather than waiting to be told again, is what makes the two
 // orders equivalent.
 func (d *daemon) joinConfiguredGroupIfInvited(ctx context.Context) {
-	if d.cfg.RouteGroup == "" {
+	groupID := d.configuredGroup()
+	if groupID == "" {
 		return
 	}
-	membership, err := d.membershipOf(d.cfg.RouteGroup)
+	// Resolved by resolveGroup above where possible. Still a prefix here means
+	// this bot holds no group matching it, so membershipOf finds nothing and the
+	// live path handles the invitation when it arrives.
+	membership, err := d.membershipOf(groupID)
 	if err != nil {
-		d.logger.Warn("could not read the configured group's facts", "group", d.cfg.RouteGroup, "error", err)
+		d.logger.Warn("could not read the configured group's facts", "group", groupID, "error", err)
 		return
 	}
 	if membership == nil {
@@ -446,19 +464,20 @@ func (d *daemon) joinConfiguredGroupIfInvited(ctx context.Context) {
 		if m.Joined {
 			return // already a member; nothing to do
 		}
-		d.logger.Info("finishing an invitation that was waiting on disk", "group", d.cfg.RouteGroup)
-		if err := d.acceptInvitation(ctx, d.cfg.RouteGroup); err != nil {
+		d.logger.Info("finishing an invitation that was waiting on disk", "group", groupID)
+		if err := d.acceptInvitation(ctx, groupID); err != nil {
 			d.logger.Error("could not accept the waiting invitation",
-				"group", d.cfg.RouteGroup, "error", err)
+				"group", groupID, "error", err)
 			return
 		}
-		d.logger.Info("joined a group", "group", d.cfg.RouteGroup)
+		d.groupID = groupID
+		d.logger.Info("joined a group", "group", groupID)
 		return
 	}
 	// Facts held, but this bot is not in the member list: it was removed, or it
 	// only ever received a snapshot of somebody else's group. Nothing to accept.
 	d.logger.Info("the configured group's facts do not list this bot as a member",
-		"group", d.cfg.RouteGroup)
+		"group", d.configuredGroup())
 }
 
 // maybeJoinGroup answers an invitation, when it is one the operator asked for.
@@ -483,7 +502,7 @@ func (d *daemon) maybeJoinGroup(ctx context.Context, res client.ReceiveResult) {
 	groupID := res.Group.GroupID
 
 	switch {
-	case groupID == d.cfg.RouteGroup:
+	case d.isConfiguredGroup(groupID):
 		// The one the operator configured. Joining is the whole point.
 	case d.cfg.AcceptGroupInvites:
 		// Explicitly opted in to being invitable.
@@ -635,7 +654,7 @@ func (d *daemon) handleStatus(context.Context, ipc.Request) (any, error) {
 		Address:    d.id.Address().String(),
 		Connected:  d.isConnected(),
 		Outbox:     waiting,
-		RouteGroup: d.cfg.RouteGroup,
+		RouteGroup: d.configuredGroup(),
 		RoutePeers: len(d.cfg.RoutePeers),
 		Uptime:     time.Since(d.started).Round(time.Second).String(),
 	}, nil
