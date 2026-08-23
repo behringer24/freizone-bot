@@ -60,6 +60,11 @@ func runDaemon(args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading configuration: %w", err)
 	}
+	// Only the daemon needs a server: the CLI subcommands talk to the local
+	// socket or read a file.
+	if err := cfg.RequireServer(); err != nil {
+		return err
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 
 	c, err := account.Open(cfg)
