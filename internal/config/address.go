@@ -157,37 +157,45 @@ func mustBe(id string, group bool) error {
 // The server part is dropped rather than kept: an account id identifies the
 // account wherever it lives, and the sender of a message is reported as an id.
 //
-// # Why a prefix is refused here, having been accepted everywhere else
+// # A prefix here too, and why that is safe
 //
-// A recipient prefix is *completed* -- the server resolves it and the client
-// verifies the result against the returned root key, or it is matched against
-// the groups this bot holds. An allow-list entry has nothing to complete it
-// against: it is checked against whoever happens to send something, so a prefix
-// would authorise *everyone* whose id begins with it. Five characters of a
-// bech32 id is not an authorisation decision anybody means to make.
-func ParseCommanders(raw []string) ([]string, error) {
-	out := make([]string, 0, len(raw))
-	seen := make(map[string]struct{}, len(raw))
+// An allow-list entry is checked against whoever happens to send something, so
+// comparing a *prefix* against senders would authorise everyone whose id begins
+// with it -- and five characters is around twenty bits, which is minutes of
+// grinding keypairs. I refused prefixes here for exactly that reason, and was
+// wrong twice over.
+//
+// Wrong in fact, because the server enforces prefix uniqueness: registering an
+// account whose id starts like an existing one is refused with
+// `id_prefix_taken` (see PROTOCOL.md's id-prefix uniqueness note), so on a given
+// server a prefix names at most one account and nobody can mint a collision.
+//
+// And wrong in approach, because the prefix does not have to be *compared* at
+// all. It is **resolved once**, at startup, into the one full id it names -- the
+// server completing it and the client verifying the result against the returned
+// root key -- and the comparison then stays exact. That is the daemon's job,
+// since it needs an open account; see cmd/bot/commanders.go.
+//
+// Uniqueness is per server, which is why the server part is kept rather than
+// dropped: `q3up8*chat.example.org` and a `q3up8…` elsewhere are different
+// accounts, and resolving against the wrong one would authorise the wrong
+// person.
+func ParseCommanders(raw []string) ([]address.Address, error) {
+	out := make([]address.Address, 0, len(raw))
 	for _, entry := range raw {
 		parsed, err := address.Parse(entry)
 		if err != nil {
 			return nil, fmt.Errorf("%q is not a Freizone address: %w", strings.TrimSpace(entry), err)
 		}
-		id, err := address.Normalize(parsed.ID)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"%q is not a whole account id: %w. An allow-list entry has to name one account -- "+
-					"a short prefix would authorise everybody whose id starts with it",
-				strings.TrimSpace(entry), err)
-		}
-		if err := mustBe(id, false); err != nil {
+		if err := mustBe(parsed.ID, false); err != nil {
 			return nil, err
 		}
-		if _, dup := seen[id]; dup {
-			return nil, fmt.Errorf("%s appears twice", id)
+		for _, seen := range out {
+			if sameRecipient(seen, parsed) {
+				return nil, fmt.Errorf("%s and %s are the same account", seen, parsed)
+			}
 		}
-		seen[id] = struct{}{}
-		out = append(out, id)
+		out = append(out, parsed)
 	}
 	return out, nil
 }

@@ -195,22 +195,37 @@ func TestEverySpellingOfACommander(t *testing.T) {
 			t.Errorf("ParseCommanders(%q): %v", raw, err)
 			continue
 		}
-		if len(got) != 1 || got[0] != acctA {
+		if len(got) != 1 || got[0].ID != acctA {
 			t.Errorf("ParseCommanders(%q) = %v, want the canonical id", raw, got)
 		}
 	}
 }
 
-// And the one place a prefix is refused rather than completed, because there is
-// nothing to complete it against: an allow-list entry is checked against whoever
-// sends something, so a prefix would authorise everybody whose id starts with it.
-func TestACommanderPrefixIsRefusedWithTheReason(t *testing.T) {
-	_, err := ParseCommanders([]string{short(acctA)})
-	if err == nil {
-		t.Fatal("a prefix in an allow-list must be refused")
+// A prefix is accepted here too, and keeps its server. The daemon resolves it
+// into the one account it names, so the authorization check still compares exact
+// ids -- see cmd/bot/commanders.go.
+//
+// Refusing it was my first answer, on the grounds that comparing a prefix would
+// authorise everyone whose id begins with it. Wrong: the server refuses to
+// register an account whose id starts like an existing one, so a prefix names at
+// most one account there -- and the prefix does not have to be compared at all,
+// only resolved once.
+func TestACommanderPrefixIsAcceptedForResolution(t *testing.T) {
+	got, err := ParseCommanders([]string{short(acctA) + "*chat.example.org"})
+	if err != nil {
+		t.Fatalf("ParseCommanders: %v", err)
 	}
-	if !strings.Contains(err.Error(), "authorise everybody") {
-		t.Errorf("the error should say why, got %q", err)
+	if len(got) != 1 {
+		t.Fatalf("got %v", got)
+	}
+	if got[0].ID != short(acctA) {
+		t.Errorf("id: got %q", got[0].ID)
+	}
+	// The server has to survive into the entry: prefix uniqueness is *per
+	// server*, so resolving against the wrong one would authorise the wrong
+	// person.
+	if got[0].Server != "https://chat.example.org" {
+		t.Errorf("server: got %q", got[0].Server)
 	}
 }
 

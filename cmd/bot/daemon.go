@@ -138,13 +138,23 @@ func runDaemon(args []string) error {
 		acceptInvitation: c.AcceptGroupInvitation,
 		membershipOf:     c.GroupMembership,
 		knownGroups:      c.Groups,
+		resolvePeer:      c.ResolvePeer,
 		id:               id,
 	}
 
 	// The command surface, if one is configured. Built after d exists because
 	// the status action reads from it -- and left entirely absent otherwise, so
 	// there is no half-wired path for a message to wander into.
-	d.policy = authz.New(cfg.Commanders, cfg.AllowGroupCommands)
+	//
+	// The allow-list is resolved first: an entry may be a short id, and the
+	// check that uses it compares exact ids. Fatal on failure, since an
+	// allow-list that quietly lost an entry is a bot that silently answers
+	// nobody -- see commanders.go.
+	commanders, err := d.resolveCommanders(ctx)
+	if err != nil {
+		return err
+	}
+	d.policy = authz.New(commanders, cfg.AllowGroupCommands)
 	if d.policy.Enabled() {
 		jokes, err := action.LoadJokes(cfg.JokesFile)
 		if err != nil {
@@ -273,6 +283,10 @@ type daemon struct {
 	// membershipOf reads a group's resolved fact set, injectable for the same
 	// reason: what is worth testing is the catch-up decision, not the fold.
 	membershipOf func(groupID string) (*group.Resolved, error)
+
+	// resolvePeer completes a short account id against a server, injectable so the
+	// allow-list decision is testable without one.
+	resolvePeer func(ctx context.Context, idOrPrefix, server string) (client.PeerEndpoint, error)
 
 	// knownGroups lists the groups this bot holds, for resolving a configured
 	// prefix into a whole group id. Injectable for the same reason again.

@@ -22,14 +22,17 @@ Releases are cut as annotated git tags.
   startup warning lists the groups the bot **is** in, since nothing else printed
   them and an operator with a wrong id had no way to find the right one.
 
-* **`FREIZONE_BOT_COMMANDERS` accepts every spelling, and a prefix is refused
-  with the reason (`BOT-16`).** The allow-list held whatever was written and
+* **`FREIZONE_BOT_COMMANDERS` accepts every spelling, a prefix included
+  (`BOT-16`).** The allow-list held whatever was written and
   compared it against the canonical account id the receive path reports, so the
   hyphenated form -- the one the app copies -- authorised nobody. It failed
   closed *and* silently, since a sender who is not on the list gets no reply by
-  design, so nothing said why. A prefix is now refused rather than completed:
-  unlike a recipient, an allow-list entry is checked against whoever sends
-  something, so a prefix would authorise everybody whose id begins with it.
+  design, so nothing said why. A prefix is **resolved once at startup** into the exact
+  account it names, so the check always compares whole ids and never a prefix
+  against a sender -- sound because the server refuses to register an account
+  whose id starts like an existing one. The `*server` part is kept and used for
+  that lookup, since prefix uniqueness is per server. An entry that cannot be
+  resolved stops the daemon rather than being skipped.
 
 * **A configured server that disagrees with the account's own is refused
   (`BOT-17`).** An account belongs to the server it was registered on -- its

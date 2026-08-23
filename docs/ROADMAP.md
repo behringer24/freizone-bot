@@ -903,3 +903,34 @@ Status: `done`
   The pattern is worth naming, because it is the third time: I made a decision
   about the *good* path ("a prefix resolves") and left the path where it does not
   resolve running on the same rails.
+
+- 2026-08-23 — **and the commander prefix refusal was itself wrong.** Andreas
+  pasted `q3up8*chat.behringer24.de` -- the app's compact form -- and hit the
+  exception I had carved out of his own rule an hour earlier.
+
+  My argument had been that comparing a prefix against senders authorises
+  everyone whose id begins with it, and five characters is around twenty bits:
+  minutes of grinding keypairs. That much is true, and it is still the reason not
+  to *compare* a prefix. It was wrong as a reason to refuse one, on two counts.
+
+  In fact, because the server enforces prefix uniqueness -- registering an
+  account whose id starts like an existing one is refused with `id_prefix_taken`
+  (PROTOCOL.md's id-prefix uniqueness note), so on a given server a prefix names
+  at most one account and the collision cannot be minted at all.
+
+  And in approach, because the prefix never has to be compared. It is
+  **resolved once**, at startup, into the one id it names -- the server
+  completing it, `pkg/client` verifying the answer against the returned root key
+  -- and the check downstream keeps comparing whole ids. `cmd/bot/commanders.go`.
+
+  Two details that make it sound rather than merely convenient. The server part
+  is kept and used for the lookup, because uniqueness is *per server*: a
+  same-prefix account elsewhere is a different person, and resolving against the
+  wrong server would authorise them. And an entry that cannot be resolved stops
+  the daemon rather than being skipped -- an allow-list that quietly lost an
+  entry is a bot that silently answers nobody, which from outside is
+  indistinguishable from one working correctly, since an unauthorised sender gets
+  no reply by design.
+
+  A whole id needs no lookup, so a bot configured with whole ids still starts
+  with its server unreachable. Only a prefix costs a request.
