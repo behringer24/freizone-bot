@@ -12,6 +12,11 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-23
+
+Two questions the bot can now answer about itself, and one piece of work
+deliberately dropped rather than carried.
+
 ### Added
 
 * **`/listrecipients` and `/routes`.** Two read-only answers to the questions an
