@@ -14,6 +14,15 @@ Releases are cut as annotated git tags.
 
 ### Fixed
 
+* **`FREIZONE_BOT_COMMANDERS` accepts every spelling, and a prefix is refused
+  with the reason (`BOT-16`).** The allow-list held whatever was written and
+  compared it against the canonical account id the receive path reports, so the
+  hyphenated form -- the one the app copies -- authorised nobody. It failed
+  closed *and* silently, since a sender who is not on the list gets no reply by
+  design, so nothing said why. A prefix is now refused rather than completed:
+  unlike a recipient, an allow-list entry is checked against whoever sends
+  something, so a prefix would authorise everybody whose id begins with it.
+
 * **A configured server that disagrees with the account's own is refused
   (`BOT-17`).** An account belongs to the server it was registered on -- its
   address is `id*server` and its keys are published there -- so pointing

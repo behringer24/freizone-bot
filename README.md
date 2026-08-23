@@ -1,4 +1,4 @@
-# Freizone Bot
+ Every spelling is accepted and reduced to the canonical id -- hyphenated, upper case, with a `*server` part. **A short prefix is refused here**, unlike everywhere else: a recipient prefix gets completed and verified, while an allow-list entry is checked against whoever sends something, so a prefix would authorise everybody whose id begins with it.# Freizone Bot
 
 An automation daemon for [Freizone](https://github.com/behringer24/freizone-server). It holds a Freizone account of its own and connects Freizone to other systems in **both directions**: something happens elsewhere and becomes a message, or a message causes something to happen.
 
