@@ -1,0 +1,26 @@
+[
+  {
+    "name": "oncall",
+    "summary": "who is carrying the pager",
+    "reply": "This week: Andreas. Next: Marek.\nRota: https://wiki.example.org/oncall"
+  },
+  {
+    "name": "greet",
+    "summary": "say hello to somebody",
+    "params": [{ "name": "who", "required": true, "pattern": "^[a-zA-Z ]{1,40}$" }],
+    "reply": "Hello {{who}}, welcome."
+  },
+  {
+    "name": "google",
+    "summary": "search the web",
+    "params": [{ "name": "query", "required": true }],
+    "request": {
+      "url": "https://www.googleapis.com/customsearch/v1?cx=DEINE_CX&num=3&fields=items(title,link)&q={{query}}",
+      "headers": { "Accept": "application/json" },
+      "tokenFile": "/etc/freizone-bot/google-key",
+      "tokenHeader": "X-goog-api-key",
+      "field": "items",
+      "timeoutSeconds": 10
+    }
+  }
+]
