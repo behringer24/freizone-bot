@@ -447,6 +447,14 @@ kept: in a federated namespace an id alone does not identify anybody.
 Without recompiling: `FREIZONE_BOT_ACTIONS_FILE` points at a JSON file of
 declared actions. Two kinds.
 
+[`docs/actions.example.json`](docs/actions.example.json) is a working file, not a
+sketch — both kinds, and the `/weather` action in it answers from a keyless
+public endpoint, so it works the moment you point the setting at it. Copy it
+somewhere of your own before editing; a file you keep in the checkout is one you
+will eventually commit by accident (`actions.json` at the root is gitignored for
+that reason). A test loads it on every build, since the example is the first
+thing anybody copies and JSON has nowhere to put a warning.
+
 **A fixed reply.** Nothing is executed, so this adds no attack surface at all —
 and it covers more than it sounds like it does: rotas, runbook links, canned
 answers, anything somebody currently has to remember.
