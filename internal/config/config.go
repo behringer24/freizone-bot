@@ -293,6 +293,12 @@ func (c *Config) validate() error {
 	// pasted -- hyphenated, upper case, with a server appended. Discarding the
 	// result here, which is what this line used to do, meant validating one
 	// value and then using another.
+	commanders, err := ParseCommanders(c.Commanders)
+	if err != nil {
+		return fmt.Errorf("%s: %w", envCommanders, err)
+	}
+	c.Commanders = commanders
+
 	groupID, err := ParseGroupID(c.RouteGroup)
 	if err != nil {
 		return fmt.Errorf("%s: %w", envRouteGroup, err)

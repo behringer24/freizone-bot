@@ -860,3 +860,24 @@ Status: `done`
   Verified live against a copy of a real account directory, both ways: the
   refusal fires on a genuinely different server, and does not fire when the same
   server is spelled without its scheme.
+
+- 2026-08-23 — **the same rule, one input further, and this was the worst place
+  it was broken:** `FREIZONE_BOT_COMMANDERS`. `authz.New` put the raw configured
+  string into its set and compared it against the canonical account id the
+  receive path reports -- so the hyphenated form, which is what the app copies,
+  matched **nobody**.
+
+  And it failed closed *and* silently, which is the shape that costs the most. A
+  sender who is not on the allow-list gets no reply at all, deliberately, since a
+  refusal tells whoever asked that something is here and listening. So the
+  operator sets the variable, sends a command, hears nothing, and has no way to
+  tell the allow-list apart from a wrong group or a stopped bot.
+
+  `ParseCommanders` now reduces every spelling to the canonical id -- hyphenated,
+  upper case, `*server`, `*local` -- and refuses what genuinely cannot work: a
+  group id, a duplicate, and **a prefix**. The prefix refusal is the interesting
+  one, because it goes the other way from everywhere else: a recipient prefix is
+  *completed* and verified, while an allow-list entry is checked against whoever
+  happens to send something, so a prefix there would authorise everybody whose id
+  begins with it. Five characters of a bech32 id is not an authorisation decision
+  anybody means to make, and the error says so.

@@ -175,3 +175,61 @@ func TestAnEmptyListIsFine(t *testing.T) {
 		t.Errorf("got %v, %v", got, err)
 	}
 }
+
+// The allow-list has to match the canonical id the receive path reports, so
+// every spelling has to reduce to it. This failed silently before: a hyphenated
+// entry -- which is what the app copies -- matched nobody, and a sender who is
+// not on the list gets no reply at all by design, so nothing said why.
+func TestEverySpellingOfACommander(t *testing.T) {
+	for _, raw := range []string{
+		acctA,
+		address.FormatForDisplay(acctA),
+		strings.ToUpper(acctA),
+		"  " + acctA + "  ",
+		acctA + "*chat.example.org",
+		acctA + "*local",
+		acctA + "*",
+	} {
+		got, err := ParseCommanders([]string{raw})
+		if err != nil {
+			t.Errorf("ParseCommanders(%q): %v", raw, err)
+			continue
+		}
+		if len(got) != 1 || got[0] != acctA {
+			t.Errorf("ParseCommanders(%q) = %v, want the canonical id", raw, got)
+		}
+	}
+}
+
+// And the one place a prefix is refused rather than completed, because there is
+// nothing to complete it against: an allow-list entry is checked against whoever
+// sends something, so a prefix would authorise everybody whose id starts with it.
+func TestACommanderPrefixIsRefusedWithTheReason(t *testing.T) {
+	_, err := ParseCommanders([]string{short(acctA)})
+	if err == nil {
+		t.Fatal("a prefix in an allow-list must be refused")
+	}
+	if !strings.Contains(err.Error(), "authorise everybody") {
+		t.Errorf("the error should say why, got %q", err)
+	}
+}
+
+func TestWhatElseACommanderListRefuses(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{groupA, "group belongs in the group route"},
+		{"nonsense!", "not a Freizone address"},
+	} {
+		if _, err := ParseCommanders([]string{tc.raw}); err == nil {
+			t.Errorf("ParseCommanders(%q) should have been refused", tc.raw)
+		} else if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("ParseCommanders(%q) = %q, want %q", tc.raw, err, tc.want)
+		}
+	}
+	// The same account twice, however spelled.
+	if _, err := ParseCommanders([]string{acctA, address.FormatForDisplay(acctA)}); err == nil {
+		t.Error("the same commander twice should be refused")
+	}
+	if got, err := ParseCommanders(nil); err != nil || len(got) != 0 {
+		t.Errorf("no commanders is not an error: %v, %v", got, err)
+	}
+}

@@ -142,3 +142,52 @@ func mustBe(id string, group bool) error {
 	}
 	return nil
 }
+
+// ParseCommanders reads the allow-list of accounts that may command the bot.
+//
+// Every spelling is accepted and reduced to the canonical id -- hyphenated,
+// upper case, with a `*server` part -- because these are the forms the app
+// displays and therefore the forms somebody pastes. Without this the list held
+// whatever was written and compared it against the canonical id the receive path
+// reports, so a hyphenated entry matched nobody. And it failed *silently*: a
+// sender who is not on the list gets no reply at all, deliberately, since a
+// refusal tells whoever asked that something is here and listening. A setting
+// that quietly authorises nobody is the worst shape that mistake can take.
+//
+// The server part is dropped rather than kept: an account id identifies the
+// account wherever it lives, and the sender of a message is reported as an id.
+//
+// # Why a prefix is refused here, having been accepted everywhere else
+//
+// A recipient prefix is *completed* -- the server resolves it and the client
+// verifies the result against the returned root key, or it is matched against
+// the groups this bot holds. An allow-list entry has nothing to complete it
+// against: it is checked against whoever happens to send something, so a prefix
+// would authorise *everyone* whose id begins with it. Five characters of a
+// bech32 id is not an authorisation decision anybody means to make.
+func ParseCommanders(raw []string) ([]string, error) {
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, entry := range raw {
+		parsed, err := address.Parse(entry)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a Freizone address: %w", strings.TrimSpace(entry), err)
+		}
+		id, err := address.Normalize(parsed.ID)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"%q is not a whole account id: %w. An allow-list entry has to name one account -- "+
+					"a short prefix would authorise everybody whose id starts with it",
+				strings.TrimSpace(entry), err)
+		}
+		if err := mustBe(id, false); err != nil {
+			return nil, err
+		}
+		if _, dup := seen[id]; dup {
+			return nil, fmt.Errorf("%s appears twice", id)
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
