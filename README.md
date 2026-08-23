@@ -430,11 +430,8 @@ What is still refused, and why:
   real risk a prefix carries, and quietly picking one would send your messages to
   a group you did not mean.
 - **a group id in `ROUTE_PEERS`, or an account id in `ROUTE_GROUP`** — they differ
-  in one leading character, the version marker. Checked on a whole id only for
-  now: reading that marker off a prefix needs a `pkg/address` addition, and
-  copying the character table into this repository is exactly what having one
-  home for the format prevents. A prefix of the wrong kind is caught when it is
-  resolved instead.
+  in one leading character, the version marker, and that is readable off a short
+  prefix as well as a whole id. So this holds for every spelling.
 - **a recipient listed twice**, however differently the two lines are spelled —
   the compact form and the whole id are one person, and so are `example.org` and
   `http://example.org`, since the scheme is how *this bot* reaches that server

@@ -955,3 +955,10 @@ Status: `done`
   it never talks to let the same smoke test walk one step further, into the
   failure that had been there all along. Which argues for smoke tests that go
   as far as they can rather than as far as they must.
+
+- 2026-08-23 — the kind check covers **every** spelling now, prefixes included:
+  `go.mod` names freizone-server `v0.24.0` and `mustBe` calls
+  `address.VersionMarkerOf`. The test that pinned the gap did its job -- it
+  failed the moment the function arrived, naming both cases it had been holding
+  open -- and has been replaced by those cases moving into the real check, for
+  the peer route, the group route and the allow-list alike.

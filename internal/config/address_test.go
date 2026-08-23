@@ -79,8 +79,18 @@ func TestEverySpellingOfAGroup(t *testing.T) {
 // The version marker is the first character, so this one mistake is catchable
 // however short the id is -- and it is the likely mistake, the two kinds of id
 // differing in exactly that character.
+// The version marker is the first character, so this holds for every spelling --
+// a short prefix included, since `address.VersionMarkerOf` reads the marker
+// without validating the rest. It did not hold for prefixes for a while, and the
+// gap was pinned by a test until `pkg/address` grew that function.
 func TestARouteStillWantsTheRightKindOfID(t *testing.T) {
-	for _, raw := range []string{groupA, address.FormatForDisplay(groupA), groupA + "*chat.example.org"} {
+	for _, raw := range []string{
+		groupA,
+		address.FormatForDisplay(groupA),
+		groupA + "*chat.example.org",
+		short(groupA),
+		short(groupA) + "*chat.example.org",
+	} {
 		_, err := ParsePeer(raw)
 		if err == nil {
 			t.Errorf("ParsePeer(%q) should have been refused", raw)
@@ -90,22 +100,14 @@ func TestARouteStillWantsTheRightKindOfID(t *testing.T) {
 			t.Errorf("ParsePeer(%q) = %q, want it to say where a group goes", raw, err)
 		}
 	}
-	if _, err := ParseGroupID(acctA); err == nil || !strings.Contains(err.Error(), "not a group id") {
-		t.Errorf("ParseGroupID(%q) = %v", acctA, err)
+	for _, raw := range []string{acctA, short(acctA), short(acctA) + "*chat.example.org"} {
+		if _, err := ParseGroupID(raw); err == nil || !strings.Contains(err.Error(), "not a group id") {
+			t.Errorf("ParseGroupID(%q) = %v", raw, err)
+		}
 	}
-}
-
-// A prefix passes the kind check and is caught at resolution instead, because
-// address.VersionOf normalises before reading the marker and so needs the whole
-// id. Pinned rather than left implicit: when pkg/address grows a
-// VersionMarkerOf, this test should start failing and be replaced by the
-// prefixes moving into the test above.
-func TestAPrefixIsNotYetKindChecked(t *testing.T) {
-	if _, err := ParsePeer(short(groupA)); err != nil {
-		t.Errorf("a group prefix in the peer route is currently accepted here: %v", err)
-	}
-	if _, err := ParseGroupID(short(acctA)); err != nil {
-		t.Errorf("an account prefix in the group route is currently accepted here: %v", err)
+	// And the allow-list, which takes accounts for the same reason.
+	if _, err := ParseCommanders([]string{short(groupA)}); err == nil {
+		t.Error("a group prefix in the commander list should be refused")
 	}
 }
 
