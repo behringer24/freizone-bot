@@ -12,6 +12,30 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Added
+
+* **`/listrecipients` and `/routes`.** Two read-only answers to the questions an
+  operator actually asks about a bot that has been running for a while: who is
+  getting these, and what decided that. `/listrecipients` names the group and
+  each person, keeping the server of a federated recipient, and says when a
+  routing rule can narrow the list. `/routes` lists the rules in configured
+  order and spells out the two things somebody would otherwise discover during
+  an incident — a message matching no rule goes everywhere, and an explicit
+  route beats the rules.
+
+  **There is deliberately no `/addrecipient`**, and the roadmap now has a
+  rejected-work section saying why: the recipient list is configuration, a
+  command that edited it would route around the review configuration exists to
+  have, and adding a recipient means every future message goes there too.
+
+### Changed
+
+* `BOT-03` is complete rather than in progress: pairing a `resolved` notice with
+  its `firing` has been **dropped** rather than deferred. The pairing key was to
+  come from a monitoring tool's payload, which `BOT-08` decided the bot does not
+  read — and firing/resolved is one domain's vocabulary in a bridge meant to
+  carry build results, digests and sensor readings too.
+
 ## [0.3.0] — 2026-08-23
 
 The bot grows a second way in, and one general rule about how much text belongs

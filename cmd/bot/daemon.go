@@ -152,7 +152,12 @@ func runDaemon(args []string) error {
 			return err
 		}
 		d.actions = action.NewRegistry()
-		action.RegisterBuiltins(d.actions, d.statusLine, jokes)
+		action.RegisterBuiltins(d.actions, action.Builtins{
+			Status:     d.statusLine,
+			Recipients: d.recipientLines,
+			Routes:     d.routeLines,
+			Jokes:      jokes,
+		})
 		if err := declared.Register(d.actions, declarations, declared.Client()); err != nil {
 			return err
 		}

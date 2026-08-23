@@ -124,13 +124,21 @@ Exit codes, since this ends up inside shell scripts:
 The bot can also answer. Set `FREIZONE_BOT_COMMANDERS` to the account ids allowed to command it, message it from one of them, and it replies in that chat:
 
 ```
-/help    list what it can do
-/ping    check that it is listening
-/status  connected, queued, uptime
-/joke    the joke of the day
+/help            list what it can do
+/ping            check that it is listening
+/status          connected, queued, uptime
+/listrecipients  who it sends to
+/routes          what decides where a message goes
+/joke            the joke of the day
 ```
 
+Plus anything you [declared in a file](#teaching-it-new-commands).
+
 Everything shipped today only reads, and nothing runs a command on the host. There is deliberately no configuration that would let you add one: `ACTION_restart=systemctl restart nginx` is remote code execution for whoever gets a message past the allow-list.
+
+**There is no `/addrecipient`, and there is not going to be one.** The recipient list is configuration: a chat command that edited it would route around whatever review that configuration has, and the change would either not survive a restart — so the command lied — or survive without appearing in the config file, so the file no longer says who is on the list. Adding a recipient also means every future message goes there too, which turns "may message this bot" into "receives everything it will ever say", quietly. If you want runtime changes, the honest shape is re-reading the configuration on a signal. See the rejected-work section of [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+`/listrecipients` and `/routes` are disclosure, and the allow-list is what gates them. With group commands switched on, the answer lands in the group for everyone in it to read.
 
 **With no commanders configured there is no command surface at all** — the bot will not answer anybody. That is fail-closed on purpose: not having decided who may drive your bot is not a decision that everyone may. A sender who is not on the list gets **silence**, not a refusal, because a refusal confirms to whoever asked that something is here and listening.
 

@@ -136,13 +136,18 @@ func TestRegisteringTwiceIsAWiringMistake(t *testing.T) {
 
 func TestHelpListsWhatIsActuallyRegistered(t *testing.T) {
 	r := NewRegistry()
-	RegisterBuiltins(r, func() string { return "fine" }, DefaultJokes)
+	RegisterBuiltins(r, Builtins{
+		Status:     func() string { return "fine" },
+		Recipients: func() string { return "nobody" },
+		Routes:     func() string { return "none" },
+		Jokes:      DefaultJokes,
+	})
 
 	out, err := r.Execute(context.Background(), "help", nil, "qalice", "qchat")
 	if err != nil {
 		t.Fatalf("help: %v", err)
 	}
-	for _, want := range []string{"/help", "/ping", "/status", "/joke"} {
+	for _, want := range []string{"/help", "/ping", "/status", "/listrecipients", "/routes", "/joke"} {
 		if !strings.Contains(out.Reply, want) {
 			t.Errorf("help should list %s:\n%s", want, out.Reply)
 		}
@@ -154,7 +159,7 @@ func TestHelpListsWhatIsActuallyRegistered(t *testing.T) {
 // bot can do.
 func TestAnActionWithoutItsDependencyIsNotOffered(t *testing.T) {
 	r := NewRegistry()
-	RegisterBuiltins(r, nil, nil) // no status source, no jokes
+	RegisterBuiltins(r, Builtins{}) // nothing lent to it at all
 
 	if out, _ := r.Execute(context.Background(), "help", nil, "q", "q"); strings.Contains(out.Reply, "/joke") {
 		t.Error("help must not offer an action that was never registered")

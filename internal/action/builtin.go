@@ -24,8 +24,23 @@ import (
 // the daemon.
 type StatusFunc func() string
 
+// Builtins is what the daemon lends this package: functions that answer a
+// question, and the jokes.
+//
+// Functions rather than the configuration itself, so this package stays unable
+// to reach anything -- it can ask, and what comes back is a string. Any of them
+// may be nil, and the action it feeds is then simply not registered: an action
+// that exists and answers "not available" is worse than one that never appears
+// in /help.
+type Builtins struct {
+	Status     StatusFunc
+	Recipients StatusFunc
+	Routes     StatusFunc
+	Jokes      []string
+}
+
 // RegisterBuiltins adds the read-only action set.
-func RegisterBuiltins(r *Registry, status StatusFunc, jokes []string) {
+func RegisterBuiltins(r *Registry, b Builtins) {
 	r.Register(Spec{
 		Name:    "help",
 		Summary: "list what I can do",
@@ -40,16 +55,34 @@ func RegisterBuiltins(r *Registry, status StatusFunc, jokes []string) {
 		return Result{Reply: "pong"}, nil
 	})
 
-	if status != nil {
-		r.Register(Spec{
-			Name:    "status",
-			Summary: "how I am doing",
-		}, func(_ context.Context, _ Request) (Result, error) {
-			return Result{Reply: status()}, nil
-		})
+	// Three answers rather than one, because they are three different
+	// questions: how am I, who gets what I send, and what decides which of them.
+	for _, ask := range []struct {
+		name, summary string
+		answer        StatusFunc
+	}{
+		{"status", "how I am doing", b.Status},
+		// Reading, not changing. There is deliberately no `/addrecipient` to go
+		// with this -- see the rejected-work section of docs/ROADMAP.md: the
+		// recipient list is configuration, and a chat command that edited it
+		// would route around the review that configuration exists to have, while
+		// turning "may message this bot" into "receives everything it will ever
+		// say".
+		{"listrecipients", "who I send to", b.Recipients},
+		{"routes", "what decides where a message goes", b.Routes},
+	} {
+		if ask.answer == nil {
+			continue
+		}
+		answer := ask.answer
+		r.Register(Spec{Name: ask.name, Summary: ask.summary},
+			func(_ context.Context, _ Request) (Result, error) {
+				return Result{Reply: answer()}, nil
+			})
 	}
 
-	if len(jokes) > 0 {
+	if len(b.Jokes) > 0 {
+		jokes := b.Jokes
 		r.Register(Spec{
 			Name:    "joke",
 			Summary: "the joke of the day",
