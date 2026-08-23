@@ -375,13 +375,87 @@ The transport seam exists from BOT-01; only the implementation is deferred.
 Needs an explicit descriptor denying remote access, since a named pipe is
 reachable over SMB by default if the descriptor permits it.
 
-### BOT-08 — Webhook receiver
-Status: `planned`
+### BOT-08 — HTTP ingress
+Status: `done`
 
-Alertmanager's native integration, and **the first network listener this bot
-has ever had** — which is why it is its own item with its own authentication
-design, its own TLS question and its own abuse handling. Reuses the routes and
-the outbox unchanged: the webhook becomes a second source for the same queue.
+An HTTP endpoint for anything that can only POST, and **the first network
+listener this bot has ever had** — which is why it is its own item with its own
+authentication design, its own TLS question and its own abuse handling. Reuses
+the routes and the outbox unchanged: the ingress is a second producer for the
+same queue.
+
+- 2026-08-23 — **done**, `internal/webhook`, and the shape of it came from a
+  correction rather than from the plan. My first design specialised toward one
+  monitoring tool: an Alertmanager adapter, N alerts per POST, grouping,
+  pairing a `resolved` with its `firing` by `fingerprint`. Andreas rejected it
+  — *"freizone-bot soll alertmanager und seine formate gar nicht kennen"*, one
+  POST is one message, talk about general length limits instead. That is the
+  third time in this repo that a design of mine drifted toward alerting, so it
+  is written down as a standing rule rather than a note on this item.
+
+  What the correction bought is not just principle, it is *most of the
+  complexity gone*. The whole grouping-and-pairing apparatus existed for one
+  reason: some senders batch several events into one request, and **reading the
+  body is the only way to know they did.** Refuse to read the body and the
+  question disappears. So:
+
+  **The body is the text. The query string is everything else** — `title`,
+  repeated `label=key:value`, an optional `route`, an optional `dedup`. The same
+  message model as `freizone-bot send`, over HTTP. The query rather than headers
+  because the URL is the one thing every sender lets you configure, while plenty
+  will not let you add a header.
+
+  A sender that posts JSON therefore gets its JSON in the chat, as text. That is
+  the honest outcome of not knowing formats, and the fix for anybody who dislikes
+  it is on the sending side.
+
+- 2026-08-23 — **length limits, general rather than per-format.** Three, and each
+  answers a different question, which is why they are three numbers and not one:
+  the request body caps at 1 MiB (a misconfigured sender must not decide how much
+  memory this process uses — `413`, nothing sent); the message reaching a chat
+  caps at 4000 characters and 60 lines (a phone screen — shortened, and it *says*
+  `(cut short)`); labels cap at 20 per request (they are rendered into the message
+  and used as a deduplication key, so an unbounded number is both unreadable and
+  a way to defeat deduplication).
+
+  The chat limit moved to `outbound.TrimToChatSize`, shared with the CLI and with
+  a command's reply — `internal/declared`'s own constants now point at it.
+  "How much text belongs in a chat message" does not depend on how the text
+  arrived, and two answers to it would have differed only by which code path
+  somebody looked at. Chosen generously rather than tightly because the README
+  documents piping twenty lines of a log in, and because the protocol is nowhere
+  near binding: a Freizone server accepts a 512 KiB request body.
+
+- 2026-08-23 — **one accept path, deliberately.** `handleSend` and the ingress
+  both call `daemon.accept`, which owns routing, deduplication, the rate cap and
+  the queue. Extracted *before* the ingress was written rather than after: three
+  times in this repo a second path has quietly drifted from the first (the group
+  join, the command dispatch, the invitation catch-up), and an ingress that
+  resolved its own routes or skipped the deduplicator because nobody remembered
+  it would have been the fourth. There is nothing to keep in step because there
+  is one path.
+
+  Authentication is a bearer token per sender, in a file, `chmod 600`, compared
+  in constant time. Per sender rather than one shared, so a single sender can be
+  switched off without switching off the rest and so a log line can say who sent
+  something — with one shared token, "who is flooding us" has no answer. A
+  listener configured with no tokens file is refused at startup: an ingress
+  nobody is authorised to use would accept everything. A token under 24
+  characters is refused, since nothing here rate-limits guessing. Tokens are
+  never quoted back into an error or a log line.
+
+  Two of my own tests found their own bugs, both of them mine rather than the
+  code's, and one of them the same Windows lesson twice: the token file's
+  permission check fired on every Windows run, because Go synthesises `0666`
+  there. `account.checkPrivate` had already solved that exact problem, so the
+  fix was to follow the pattern already in the repo rather than invent one.
+
+  Verified against the running daemon with `curl`, not only in tests: `401`
+  without a token, `404` on another path, `405` on a `GET`, `400` on an empty
+  request, `202` with `queued for 1 destination(s)` — and the log line naming
+  the sender and the title, with the body **absent from the log**, which is the
+  rule the rest of the bot follows and the one worth checking rather than
+  assuming.
 
 ### BOT-09 — Server-assistant role
 Status: `planned` · Also affects: freizone-server

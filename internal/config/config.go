@@ -45,6 +45,8 @@ const (
 	envAllowGroupCommand = "FREIZONE_BOT_ALLOW_GROUP_COMMANDS"
 	envJokesFile         = "FREIZONE_BOT_JOKES_FILE"
 	envActionsFile       = "FREIZONE_BOT_ACTIONS_FILE"
+	envWebhookAddr       = "FREIZONE_BOT_WEBHOOK_ADDR"
+	envWebhookTokens     = "FREIZONE_BOT_WEBHOOK_TOKENS_FILE"
 	envAcceptInvites     = "FREIZONE_BOT_ACCEPT_GROUP_INVITES"
 
 	envMaxAge    = "FREIZONE_BOT_MAX_AGE_MINUTES"
@@ -163,6 +165,15 @@ type Config struct {
 	// or an HTTP request to something that already exists. See internal/declared.
 	ActionsFile string
 
+	// WebhookAddr is where the HTTP ingress listens. Empty means there is none,
+	// which is the default and the property worth keeping: the bot opens no
+	// network listener unless somebody says so.
+	WebhookAddr string
+
+	// WebhookTokens is the file naming who may POST. Required whenever
+	// WebhookAddr is set -- an open ingress is not an option this offers.
+	WebhookTokens string
+
 	MaxAge              time.Duration
 	RatePerMinute       int
 	OutboxMax           int
@@ -186,6 +197,8 @@ func Load(getenv func(string) string) (*Config, error) {
 		Commanders:    splitList(getenv(envCommanders)),
 		JokesFile:     strings.TrimSpace(getenv(envJokesFile)),
 		ActionsFile:   strings.TrimSpace(getenv(envActionsFile)),
+		WebhookAddr:   strings.TrimSpace(getenv(envWebhookAddr)),
+		WebhookTokens: strings.TrimSpace(getenv(envWebhookTokens)),
 	}
 
 	level, err := parseLogLevel(orDefault(getenv(envLogLevel), "info"))
@@ -252,6 +265,18 @@ func (c *Config) validate() error {
 	if c.StateDir == "" {
 		return fmt.Errorf("%s must not be empty", envStateDir)
 	}
+	if c.WebhookAddr != "" && c.WebhookTokens == "" {
+		// An ingress with no allow-list is the one configuration this refuses to
+		// assemble: it would accept a message from anything that can reach the
+		// port, and this bot is a full member of somebody's group.
+		return fmt.Errorf("%s is set but %s is not: an ingress with nobody authorised to use it would accept everything", envWebhookAddr, envWebhookTokens)
+	}
+	if c.WebhookTokens != "" && c.WebhookAddr == "" {
+		// The mirror image, and a warning would be too quiet: somebody wrote a
+		// token file expecting an ingress, and there is none.
+		return fmt.Errorf("%s is set but %s is not, so nothing is listening for those senders", envWebhookTokens, envWebhookAddr)
+	}
+
 	if _, err := ParseGroupID(c.RouteGroup); err != nil {
 		return fmt.Errorf("%s: %w", envRouteGroup, err)
 	}

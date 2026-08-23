@@ -12,6 +12,23 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Added
+
+* **An HTTP ingress, off by default (`BOT-08`).** For anything that can only
+  POST. The body is the message text and the query string carries the title,
+  the labels, an optional route and an optional deduplication key — the same
+  message model as `freizone-bot send`, over HTTP. **One request is one
+  message.** The body is never parsed and no sender's payload format is known
+  to the bot, which is what keeps it a general bridge rather than one
+  monitoring tool's companion. Requires a file naming who may POST, and
+  refuses to start without one
+* **General length limits, in one place.** A request body caps at 1 MiB
+  (`413` beyond it); a message reaching a chat caps at 4000 characters and 60
+  lines and says `(cut short)` when it was shortened; labels cap at 20 per
+  request. The chat limit is shared by every producer — the CLI, the ingress
+  and a command's reply — because how much text belongs in a chat message does
+  not depend on how it arrived
+
 ### Fixed
 
 * **`FREIZONE_BOT_CONTROL_GROUP` does something now (`BOT-14`).** It was read

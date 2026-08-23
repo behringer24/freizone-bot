@@ -4,11 +4,11 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Why this exists:** operations alerting is the first thing it does. A monitoring system that pages you through Slack or Telegram hands every alert — hostnames, internal addresses, stack traces, sometimes a credential in a log line — to a third party. Freizone is end-to-end encrypted and self-hosted, so the same alert reaches the same phone without anyone in between being able to read it. Alerting is the first capability rather than the shape of the whole thing: the same daemon is where a server-assistant, a command bot and later integrations live.
 
-**Status:** `BOT-01`, `BOT-02`, `BOT-05` and most of `BOT-03` work, driven end to end against a real server rather than only in tests: the daemon registers its own account, joins the group it was configured for, delivers messages handed to it over a local socket with a durable queue behind them, and answers commands from an allow-listed sender. Not there yet: pairing a `resolved` notice with its `firing` (`BOT-03`), a webhook receiver (`BOT-08`), a server-assistant role (`BOT-09`), interpretation by a model (`BOT-10`). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+**Status:** `BOT-01`, `BOT-02`, `BOT-05` and most of `BOT-03` work, driven end to end against a real server rather than only in tests: the daemon registers its own account, joins the group it was configured for, delivers messages handed to it over a local socket or an optional HTTP ingress with a durable queue behind them, and answers commands from an allow-listed sender. Not there yet: pairing a `resolved` notice with its `firing` (`BOT-03`), a server-assistant role (`BOT-09`), interpretation by a model (`BOT-10`). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## What the bot never does
 
-- **It opens no network listener.** Its only ingress is a unix socket inside its own state directory, reachable by whoever the operator puts in one group and nobody else. There is no port to expose and no `EXPOSE` line in the Dockerfile — when that changes, it will be a deliberate release with its own authentication design ([`BOT-08`](docs/ROADMAP.md)), not a configuration flag somebody flips.
+- **It opens no network listener unless you ask it to.** By default its only ingress is a unix socket inside its own state directory. The [HTTP ingress](#the-http-ingress) exists (`BOT-08`) and is off until `FREIZONE_BOT_WEBHOOK_ADDR` names an address — and it refuses to start without a file naming who may use it. There is still no `EXPOSE` line in the Dockerfile, because the recommendation is to bind localhost and let a proxy terminate TLS.
 - **It implements none of the Freizone protocol.** Encryption, sessions, delivery semantics and group convergence all live in freizone-server's [`pkg/client`](https://github.com/behringer24/freizone-server/tree/master/pkg/client), which the app uses too. The bot's own code begins after a message has been decrypted.
 - **It never logs message bodies.** They land permanently in every recipient's transcript and routinely carry things that should not also sit in a log file. Title and labels are enough.
 
@@ -19,6 +19,8 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 **One process owns the account directory.** The daemon takes an exclusive lock on it and the CLI never opens it — it talks to the daemon over the control socket instead. This is not tidiness: two processes writing one account's ratchet state corrupt it, permanently and silently.
 
 **The control socket is an authentication boundary.** Whoever can write to it can make the bot say *"false alarm, all clear"* into the alert group during a real incident — suppression is as damaging here as spam. The socket's parent directory is the gate: `0750`, owned by the daemon's user and an operator group you choose.
+
+**The HTTP ingress is a second authentication boundary, and a wider one**, because it is reachable by whatever can route to the port rather than by whoever holds a unix group. It is off by default, refuses to start without a file naming who may use it, and refuses a token short enough to guess. Bind it to localhost unless you have a reason not to.
 
 **Incoming messages are untrusted input from anyone** who knows the bot's address, and every group member does. Commands are therefore off unless an allow-list is configured, a sender who is not on it gets no reply at all, and the authorization check runs *before* any interpretation of the text — which is what will keep a future model-driven interpreter from being promptable by strangers.
 
@@ -153,7 +155,102 @@ EnvironmentFile=/etc/freizone-bot.env
 ExecStart=/usr/local/bin/freizone-bot send -severity critical -title "%i failed" -source %H
 ```
 
-Nagios, Icinga, Zabbix, Sensu, cron and CI steps all take the same shape — anything that can run a command. Alertmanager cannot: it has no exec receiver and only posts webhooks, so it needs `BOT-08`.
+Nagios, Icinga, Zabbix, Sensu, cron and CI steps all take the same shape — anything that can run a command. Anything that can only POST goes through the [HTTP ingress](#the-http-ingress) instead.
+
+## The HTTP ingress
+
+For anything that can only POST. Off unless you configure it — there is no
+listener otherwise, and that is a property of the code rather than a default.
+
+```sh
+FREIZONE_BOT_WEBHOOK_ADDR=127.0.0.1:9095 \
+FREIZONE_BOT_WEBHOOK_TOKENS_FILE=/etc/freizone-bot/senders \
+freizone-bot run
+```
+
+The senders file is one `name:token` per line (`#` comments ignored), `chmod
+600`. A name per token so a single sender can be switched off without switching
+off the rest, and so a log line can say who sent something.
+
+```
+# /etc/freizone-bot/senders
+ci: 4Xr9kQ2mWv7ePtL1sYzN8bDf
+monitoring: hT6cJ0uRnA3gKxM5wQpZ9yVe
+```
+
+Then:
+
+```sh
+curl -X POST "https://bot.example.org/hook?title=Backup+failed&label=host:web01" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data "/srv was full"
+```
+
+**The whole contract: the body is the text, the query string is everything
+else.** `title`, any number of `label=key:value`, an optional `route` and an
+optional `dedup` key — the same message model as `freizone-bot send`, over HTTP.
+The query rather than headers, because the URL is the one thing every sender
+lets you configure while plenty of them will not let you add a header.
+
+### It knows no sender's format
+
+The body is never parsed. Not Alertmanager's payload, not Grafana's, not
+anybody's — and that is a decision about what this bot is, not a gap. A named
+adapter for one monitoring tool would make that tool's vocabulary the centre of
+gravity, and a build result, a scheduled digest, a sensor reading and a chat
+companion's answer would all have to bend into it.
+
+The consequence, and it is the feature: **one request is one message.** No
+grouping, no fan-out, no pairing a "resolved" with an earlier "firing". All of
+that complexity exists only because some senders batch several events into one
+POST — and reading the body is the only way to know they did. If you want a
+batch reshaped, put something in front of this that reshapes it.
+
+So a sender that posts JSON gets its JSON in the chat, as text. That is
+honest — and if it is not what you want, the fix is on the sending side.
+
+### Lengths
+
+| Limit | Value | Why |
+| --- | --- | --- |
+| Request body | 1 MiB | Beyond it, `413` and nothing is sent. Not readability — this is about a misconfigured sender not deciding how much memory the daemon uses |
+| Message in the chat | 4000 characters, 60 lines | Beyond it, the message is shortened and **says** `(cut short)`. A truncated message that looks complete is worse than a short one |
+| Labels per request | 20 | They are rendered into the message and used as a deduplication key, so an unbounded number is both an unreadable message and a way to defeat deduplication |
+
+The chat limit is `outbound`'s, shared with the CLI and with a command's reply:
+how much text belongs in a chat message does not depend on how the text arrived.
+It is generous rather than tight because piping twenty lines of a log in is a
+documented use, and the protocol is nowhere near the binding constraint — a
+Freizone server accepts a request body of 512 KiB.
+
+### Answers
+
+| Status | Means |
+| --- | --- |
+| `202` | Queued. The body says for how many destinations, or that a cap suppressed it |
+| `400` | Nothing to send, or a malformed label |
+| `401` | No token, or not one of the configured ones |
+| `413` | The body is over 1 MiB |
+| `503` | No route configured for it, or the queue is full (with `Retry-After`) |
+
+### What to think about before switching it on
+
+This is the only part of the bot that accepts input from the network, and the
+process holds long-lived private keys and is a full member of somebody's group.
+So:
+
+- **Bind it to localhost** and let a reverse proxy terminate TLS. That keeps
+  "no exposed port" the default and makes certificate renewal a solved problem
+  somebody else already runs. A public interface should be a deliberate choice.
+- **A listener with no senders file is refused at startup.** An ingress nobody
+  is authorised to use would accept everything, and that is not a configuration
+  this assembles.
+- **A token under 24 characters is refused**, since nothing here rate-limits
+  guessing.
+- **The rate cap and the queue are shared** with every other producer. A sender
+  that floods will consume the budget the `systemd OnFailure=` path was relying
+  on — which is a reason to watch the suppression lines in the log, and why
+  each sender is named in them.
 
 ## A container, or just the binary?
 
@@ -215,8 +312,9 @@ important of them reads everything.
 
 **One bot for the whole farm** is the shape you actually want at that size, and
 it needs an ingress this bot does not have: something the other hosts can reach
-over the network. That is exactly `BOT-08`, and it is why the webhook is a
-release of its own with its own authentication design rather than a flag.
+over the network -- which is what the [HTTP ingress](#the-http-ingress) is. The
+other hosts POST to it, and none of them needs an account, an invitation or a
+membership in the group.
 
 Until then there is a middle road that needs no new code, because the transport
 already exists and is already authenticated: run the daemon on one host and let
@@ -266,6 +364,8 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_COMMANDERS` | – (off) | Comma-separated account ids that may command the bot. **Empty disables the command surface entirely** — the bot will not answer anybody. Deliberately not "whoever is in the group": group membership changes without you being told, a configured list changes when you change it. |
 | `FREIZONE_BOT_ALLOW_GROUP_COMMANDS` | `false` | Whether commands may be given in a group. Off by default: a command in a group is visible to everyone in it, its answer is too, and the membership drifts. With it off the bot takes instructions only in a one-to-one chat. |
 | `FREIZONE_BOT_JOKES_FILE` | – | One joke per line (`#` comments and blank lines ignored) for the `/joke` action, replacing the small built-in set. |
+| `FREIZONE_BOT_WEBHOOK_ADDR` | – (off) | Where the [HTTP ingress](#the-http-ingress) listens, e.g. `127.0.0.1:9095`. Unset means there is no listener at all. Bind localhost and let a reverse proxy terminate TLS unless you have a reason not to: that keeps "no exposed port" the default and leaves certificate renewal to something that already does it. |
+| `FREIZONE_BOT_WEBHOOK_TOKENS_FILE` | – | One `name:token` per line (`#` comments ignored), `chmod 600`. **Required whenever the ingress is configured** — an ingress nobody is authorised to use would accept everything, so that combination is refused at startup rather than assembled. A name per token so one sender can be switched off without switching off the rest, and so a log line can say who sent something. A token under 24 characters is refused, since nothing here rate-limits guessing. |
 | `FREIZONE_BOT_ACTIONS_FILE` | – | Actions declared in a JSON file instead of in Go: a fixed reply, or an HTTP request whose answer becomes the reply. See [Teaching it new commands](#teaching-it-new-commands). Only reachable once `FREIZONE_BOT_COMMANDERS` names somebody — a declarations file with no allow-list reaches nobody at all, so that combination warns at startup rather than coming up looking fine. |
 | `FREIZONE_BOT_DEDUP_WINDOW_MINUTES` | `0` (off) | Collapses repeats of the same message within this many minutes: something that flaps every thirty seconds arrives once and then carries a count. Two messages are "the same" by title and labels — deliberately **not** the body, which routinely carries a timestamp or a measurement that differs every time while the thing being reported plainly does not. Pass `-dedup-key` to decide it yourself. Off by default because deciding two messages are one event is a judgement whatever produced them is usually better placed to make. |
 | `FREIZONE_BOT_MAX_AGE_MINUTES` | `60` | How long an undelivered message keeps being retried before it is dropped. An alert delivered six hours late is noise. The drop is logged at error level naming the message and its destination — a silent one would be a lie about a channel somebody is relying on. |

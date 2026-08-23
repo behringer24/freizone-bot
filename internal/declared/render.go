@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/behringer24/freizone-bot/internal/outbound"
 )
 
 // Turning somebody else's HTTP response into something worth reading in a chat.
@@ -48,12 +50,11 @@ import (
 // tell what the bot found from what the bot itself is saying.
 
 const (
-	// ReplyLimit is how much of an answer reaches a chat. A phone screen, not a
-	// terminal: past this nobody is reading, they are scrolling.
-	ReplyLimit = 2000
-
-	// LineLimit caps a list, for the same reason.
-	LineLimit = 25
+	// ReplyLimit and LineLimit are outbound's answer, not a second one. How much
+	// text belongs in a chat message does not depend on whether it arrived as a
+	// pushed message or as an answer to a command.
+	ReplyLimit = outbound.MaxMessageChars
+	LineLimit  = outbound.MaxMessageLines
 
 	// listCap is one less, so the "… and N more" line fits inside LineLimit.
 	//
@@ -111,7 +112,7 @@ func render(status int, contentType string, body []byte, field string) (string, 
 		return trimToChatSize(trimmed), nil
 
 	default:
-		// Deliberately not "here is the first 2000 characters of it". An HTML
+		// Deliberately not "here are the first few thousand characters of it". An HTML
 		// page or a binary blob in a transcript is noise that cannot be
 		// un-sent, and the useful information is that the endpoint answered
 		// with something this cannot read.
@@ -222,29 +223,8 @@ func oneLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// trimToChatSize trims a reply to something readable, and says when it did.
-func trimToChatSize(s string) string {
-	lines := strings.Split(s, "\n")
-	truncatedLines := false
-	if len(lines) > LineLimit {
-		lines, truncatedLines = lines[:LineLimit], true
-		s = strings.Join(lines, "\n")
-	}
-	if len(s) > ReplyLimit {
-		// Cut on a rune boundary, so a truncated reply is not invalid UTF-8.
-		cut := ReplyLimit
-		for cut > 0 && !isRuneStart(s[cut]) {
-			cut--
-		}
-		return strings.TrimSpace(s[:cut]) + "\n\n(cut short)"
-	}
-	if truncatedLines {
-		return s + "\n\n(cut short)"
-	}
-	return s
-}
-
-func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
+// trimToChatSize is outbound's, so a cut answer and a cut message read the same.
+func trimToChatSize(s string) string { return outbound.TrimToChatSize(s) }
 
 // looksTextual is for an endpoint that sent no content type at all, which is
 // common enough in small internal services to be worth handling rather than
