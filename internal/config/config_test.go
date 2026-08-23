@@ -14,13 +14,30 @@ func envMap(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
-func TestServerIsRequired(t *testing.T) {
-	_, err := Load(envMap(nil))
+// The daemon needs a server; the CLI does not.
+//
+// Load used to insist on one for everybody, which made the `systemd OnFailure=`
+// unit carry a setting `send` has no use for -- and answered a forgotten one
+// with "the bot has no default server to register against", which is not what
+// the caller was doing. `send` and `status` speak to the local socket and
+// `whoami` reads a file; none of them has a server to talk to.
+func TestOnlyTheDaemonNeedsAServer(t *testing.T) {
+	cfg, err := Load(envMap(nil))
+	if err != nil {
+		t.Fatalf("a CLI invocation with no server must still load: %v", err)
+	}
+
+	err = cfg.RequireServer()
 	if err == nil {
-		t.Fatal("a bot with no server must not start: it would have to guess where to register an identity")
+		t.Fatal("the daemon with no server must not start: it would have to guess where to register an identity")
 	}
 	if !strings.Contains(err.Error(), envServer) {
 		t.Errorf("the error has to name the variable to set, got %q", err)
+	}
+
+	cfg.Server = "https://chat.example.org"
+	if err := cfg.RequireServer(); err != nil {
+		t.Errorf("with a server configured: %v", err)
 	}
 }
 

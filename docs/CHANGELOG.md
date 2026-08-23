@@ -12,6 +12,24 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Added
+
+* **A setup guide (`docs/SETUP.md`).** One path, in order, from nothing to a bot
+  that delivers: register, invite, route, verify, and then make it a service —
+  with a complete hardened systemd unit and a Docker equivalent, a
+  troubleshooting table, and a list of what catches people out. The README had
+  grown into a reference and was unusable as a walkthrough; it keeps the
+  reference and links to the guide
+
+### Fixed
+
+* **`send`, `status` and `whoami` no longer require `FREIZONE_BOT_SERVER`.** Only
+  the daemon talks to a server — `send` and `status` speak to the local socket
+  and `whoami` reads a file. The `systemd OnFailure=` unit therefore had to carry
+  a setting it has no use for, and forgetting it answered a send with "the bot
+  has no default server to register against", which is not what the caller was
+  doing
+
 ## [0.4.0] — 2026-08-23
 
 Two questions the bot can now answer about itself, and one piece of work

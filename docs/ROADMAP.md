@@ -733,3 +733,53 @@ property of the code into a property of the configuration. Once the handlers are
 Decided at `BOT-01`. Forks a long-lived, key-holding process into whatever
 context a cron job happened to have: wrong user, no supervision, inherited file
 descriptors — and N concurrent jobs then race for the account lock.
+
+### BOT-15 — A guide, separate from the reference
+Status: `done`
+
+- 2026-08-23 — the README had grown to 559 lines and 25 headings and had become a
+  *reference*: good for looking something up, unusable as a path from nothing to
+  a working bot. Asked whether the repo had setup help, the honest answer was
+  "there is a section called Getting it running, and no, it does not".
+
+  What a first-time operator specifically did not get: **no systemd unit for the
+  daemon** (only the one-shot sender unit, while the security section implicitly
+  promises a hardened one), no `docker run` example, no end-to-end order in one
+  place -- the container-or-binary decision sat 230 lines *after* the install
+  instructions -- and no "how do I know it works" step.
+
+  `docs/SETUP.md` is the walkthrough: one path, seven steps, both deployment
+  shapes complete, a troubleshooting table, and a closing list of what catches
+  people out. The README keeps the reference and links to it twice. Splitting
+  rather than rewriting, because a guide and a reference have different readers
+  and merging them is what produced the 559 lines.
+
+  **Three of my own drafted claims were wrong** and were caught by checking them
+  against the code rather than by remembering: the join log line says `joined a
+  group` and not `joined the configured group`, and `status` prints
+  `connected: true` / `outbox: N waiting` where I had written the chat
+  command's wording (`connected: yes` / `queued: N`). That the two surfaces word
+  the same facts differently is a small wart of its own, left alone.
+
+  **And two defects in the systemd unit I had drafted**, both of which would have
+  shipped a unit that does not work. `ProtectSystem=strict` makes the filesystem
+  read-only apart from what a unit explicitly asks for, so a hand-created
+  `/var/lib/freizone-bot` would have been unwritable -- `StateDirectory=` is what
+  makes it work, and it sets the mode too. And `StartLimitIntervalSec=` /
+  `StartLimitBurst=` belong in `[Unit]`, not `[Service]`, where systemd has
+  silently ignored them since v229.
+
+  Checked mechanically rather than by reading: every `FREIZONE_BOT_*` variable
+  the guide names exists in `config.go` (11 of 11), and every README anchor it
+  links to resolves (9 of 9). Not checked end to end -- the local test instances
+  were not running by then, and starting somebody's containers to test a document
+  is the wrong trade.
+
+- 2026-08-23 — **`send`, `status` and `whoami` no longer demand a server
+  address.** `config.Load` insisted on one for every subcommand, though only the
+  daemon talks to a server: `send` and `status` speak to the local socket and
+  `whoami` reads a file. So the flagship `systemd OnFailure=` unit had to carry a
+  setting it has no use for, and a forgotten one answered a send with "the bot
+  has no default server to register against" -- which is not what the caller was
+  doing. Found while writing the guide, which would otherwise have had to
+  document the requirement as though it made sense.

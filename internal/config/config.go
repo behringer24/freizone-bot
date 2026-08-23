@@ -258,10 +258,21 @@ func Load(getenv func(string) string) (*Config, error) {
 	return cfg, nil
 }
 
-func (c *Config) validate() error {
+// RequireServer is the daemon's own check, deliberately not part of validate.
+//
+// Only `run` talks to a Freizone server. `send` and `status` speak to the local
+// socket and `whoami` reads a file, so requiring a server address of them made
+// the `systemd OnFailure=` unit carry a setting it had no use for -- and, when
+// somebody forgot it, answered a send with "the bot has no default server to
+// register against", which is not what they were doing.
+func (c *Config) RequireServer() error {
 	if c.Server == "" {
 		return fmt.Errorf("%s is required: the bot has no default server to register against", envServer)
 	}
+	return nil
+}
+
+func (c *Config) validate() error {
 	if c.StateDir == "" {
 		return fmt.Errorf("%s must not be empty", envStateDir)
 	}

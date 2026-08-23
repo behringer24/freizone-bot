@@ -4,6 +4,8 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Why this exists:** operations alerting is the first thing it does. A monitoring system that pages you through Slack or Telegram hands every alert — hostnames, internal addresses, stack traces, sometimes a credential in a log line — to a third party. Freizone is end-to-end encrypted and self-hosted, so the same alert reaches the same phone without anyone in between being able to read it. Alerting is the first capability rather than the shape of the whole thing: the same daemon is where a server-assistant, a command bot and later integrations live.
 
+**New here?** [`docs/SETUP.md`](docs/SETUP.md) walks it through from nothing; this file is the reference.
+
 **Status:** `BOT-01` through `BOT-03`, `BOT-05`, `BOT-08` and `BOT-12` work, driven end to end against a real server rather than only in tests: the daemon registers its own account, joins the group it was configured for, delivers messages handed to it over a local socket or an optional HTTP ingress with a durable queue behind them, and answers commands from an allow-listed sender. Not there yet: a server-assistant role (`BOT-09`), interpretation by a model (`BOT-10`). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## What the bot never does
@@ -25,6 +27,11 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 **Incoming messages are untrusted input from anyone** who knows the bot's address, and every group member does. Commands are therefore off unless an allow-list is configured, a sender who is not on it gets no reply at all, and the authorization check runs *before* any interpretation of the text — which is what will keep a future model-driven interpreter from being promptable by strangers.
 
 ## Getting it running
+
+> **Setting one up for the first time?** [`docs/SETUP.md`](docs/SETUP.md) is the
+> walkthrough: one path, in order, from nothing to a bot that delivers, with a
+> complete systemd unit and a Docker equivalent. **This file is the reference** —
+> every setting and the reasoning behind it — which is a different thing to read.
 
 You need a Freizone server to register against — any instance, including one you run locally for the purpose. The bot needs its address, and an invite code if that server's registration policy requires one.
 
