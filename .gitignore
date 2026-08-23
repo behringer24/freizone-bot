@@ -2,6 +2,13 @@
 /dist/
 .env
 
+# Build artefacts anywhere, not just in /bin: a stray `go build` in the repo
+# root put a 10 MB bot.exe into a public repository, swept in by a git add -A.
+*.exe
+*.dll
+*.so
+*.dylib
+
 # The bot's own state: account directory (private keys), media, outbox,
 # control socket. Never committed, and named here rather than only in
 # .dockerignore because a stray `git add -A` is the likelier accident.
