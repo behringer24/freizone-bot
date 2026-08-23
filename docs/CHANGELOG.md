@@ -12,6 +12,13 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-23
+
+An afternoon of running the bot against real servers, which found more than the
+tests had — six defects, every one of them a decision I had made about the path
+where things go right, with the other path left running on the same rails. Plus
+the guide the README had stopped being.
+
 ### Fixed
 
 * **An unresolved group prefix is no longer used as a destination (`BOT-16`).**
@@ -59,6 +66,26 @@ Releases are cut as annotated git tags.
   returned id against the returned root key. What genuinely needed guarding was
   an **ambiguous** prefix, which is now an error naming every match.
 
+* **The container could not write its own state.** `docker run -v …:/data` — the
+  documented command — failed with `mkdir /data/account: permission denied`. A
+  named volume takes its owner from the directory already in the image, and
+  `/data` was not in the image, so Docker created it as root while the process
+  runs as nonroot. The image now carries an empty `/data` owned by 65532.
+
+  Worth saying how this hid: until this release every container smoke test
+  failed earlier, on `FREIZONE_BOT_SERVER is required`, so "the entrypoint
+  answers" had been checked against a configuration error and never reached the
+  state directory at all. Making `whoami` stop requiring a server is what
+  exposed it
+
+* **A dropped command says why, in the log.** Three early returns were silent —
+  no command surface, a duplicate or blocked sender, a message that is not text —
+  so a command that arrived and was then dropped left one received-envelope line
+  and nothing after it. That is exactly the position an operator is in when a
+  command goes unanswered: something happened, nothing says what. One debug line
+  each, naming the sender, never the text. The refusal to the *sender* stays
+  silent, since a refusal confirms to whoever asked that something is listening
+
 * **`config.Load` used the raw group id rather than the parsed one.** It called
   the parser and discarded the result, so it validated one value and then used
   another — whatever spelling had been pasted, hyphens and server part included
@@ -82,7 +109,6 @@ Releases are cut as annotated git tags.
   development and testing platform for this bot, not a hardened deployment
   target, and the guide says so
 
-### Fixed
 
 * **`send`, `status` and `whoami` no longer require `FREIZONE_BOT_SERVER`.** Only
   the daemon talks to a server — `send` and `status` speak to the local socket

@@ -934,3 +934,24 @@ Status: `done`
 
   A whole id needs no lookup, so a bot configured with whole ids still starts
   with its server unreachable. Only a prefix costs a request.
+
+### BOT-18 — The container could not write its own state
+Status: `done`
+
+- 2026-08-23 — `docker run -v freizone-bot-data:/data … run`, the command
+  `docs/SETUP.md` documents, failed with
+  `mkdir /data/account: permission denied`. A named volume takes its owner and
+  mode from the directory already present in the image; `/data` was not in the
+  image, so Docker created it as root at run time while the process runs as
+  `nonroot`. The image carries an empty `/data` owned by 65532 now.
+
+  **How it hid is the part worth keeping.** Every container check before this
+  release stopped earlier, at `FREIZONE_BOT_SERVER is required` -- so "the image
+  builds and its entrypoint answers", which I wrote in three release notes, had
+  been verified against a *configuration error* and never once reached the state
+  directory. A green check that proves nothing looks exactly like a green check.
+
+  What exposed it was an unrelated fix: making `whoami` stop demanding a server
+  it never talks to let the same smoke test walk one step further, into the
+  failure that had been there all along. Which argues for smoke tests that go
+  as far as they can rather than as far as they must.
