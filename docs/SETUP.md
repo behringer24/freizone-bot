@@ -93,7 +93,11 @@ In the Freizone app:
    whoever takes over the machine running this bot can read that group's *future*
    traffic.
 2. Invite the address from step 2.
-3. Copy the group's id.
+3. Note the group's id. **Whatever form you can get hold of will do** — the whole
+   id, the hyphenated form, or just the short prefix the app shows in its compact
+   `shortid*domain` rendering, with or without the server. The bot completes a
+   prefix against the groups it is in, and tells you if one is ambiguous. See
+   [Addressing recipients](../README.md#addressing-recipients).
 
 You do not have to accept anything on the bot's behalf. **It accepts that
 invitation itself**, because naming the group in its configuration is what asks

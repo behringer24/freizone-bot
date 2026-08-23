@@ -12,6 +12,29 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Fixed
+
+* **Every spelling of a Freizone address is accepted, for groups as well as
+  accounts (`BOT-16`).** The whole id, the hyphenated display form, the short
+  prefix from the app's compact rendering, upper case, with `*server`, with
+  `*local`, with a bare `*`, with none — in `FREIZONE_BOT_ROUTE_PEERS` and in
+  `FREIZONE_BOT_ROUTE_GROUP` alike. A group id may carry a server part, which is
+  accepted and discarded: a group is not reached through a server, but the form
+  the app shows carries one.
+
+  This bot used to require the whole checksummed id, on the reasoning that a
+  truncated one in a configuration file should fail rather than resolve to
+  whoever happens to match. That was wrong: every one of those forms is one the
+  app *displays*, so refusing any of them means the form most likely to be
+  pasted is the one that does not work — and completing a prefix is verified
+  rather than guessed, the server completing it and the client then checking the
+  returned id against the returned root key. What genuinely needed guarding was
+  an **ambiguous** prefix, which is now an error naming every match.
+
+* **`config.Load` used the raw group id rather than the parsed one.** It called
+  the parser and discarded the result, so it validated one value and then used
+  another — whatever spelling had been pasted, hyphens and server part included
+
 ### Added
 
 * **A setup guide (`docs/SETUP.md`).** One path, in order, from nothing to a bot

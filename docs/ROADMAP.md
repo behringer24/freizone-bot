@@ -783,3 +783,54 @@ Status: `done`
   has no default server to register against" -- which is not what the caller was
   doing. Found while writing the guide, which would otherwise have had to
   document the requirement as though it made sense.
+
+### BOT-16 — Every spelling of an address, everywhere
+Status: `done`
+
+- 2026-08-23 — Andreas configured `FREIZONE_BOT_ROUTE_GROUP="p5stj*chatcentral.de"`
+  -- the compact form the app displays -- and this bot refused it on two counts.
+  The rule he then stated is general and applies to **every** address input, for
+  groups as much as for accounts: the whole id, the hyphenated display form, the
+  short prefix, with `*server`, with `*local`, with a bare `*`, with none.
+
+  **My strictness was the wrong decision**, and worth recording as such. The
+  argument was that configuration is not typed under time pressure, so a
+  truncated id should fail rather than resolve to whoever happens to match. It is
+  wrong twice over. In principle, because every one of those forms is one the app
+  *displays*, so refusing any of them means the form most likely to be pasted is
+  the one that does not work. And in fact, because completing a prefix is not
+  guessing: `ResolvePeer` has the server complete it and then verifies the
+  returned id against the returned root key, and `StartConversation` takes an
+  `addressOrPrefix` -- the core could do this all along and only this bot's
+  configuration layer refused.
+
+  What genuinely needed guarding was the one case I had not separated out: an
+  **ambiguous** prefix. That is an error now, naming every match, because quietly
+  picking one would send somebody's messages to a group they did not mean.
+
+- 2026-08-23 — a bug found on the way: `config.Load` called `ParseGroupID` and
+  **discarded the result**. So it validated one value and then used another --
+  the raw string, in whatever spelling was pasted. `p5stj*chatcentral.de` would
+  have passed validation and then been used verbatim as a group id. Now stored.
+
+  Resolution needed somewhere to live, since a prefix cannot be resolved without
+  an open account. `cmd/bot/group.go`: `resolveGroup` at startup matches the
+  configured value against `Client.Groups()`, and `configuredGroup()` /
+  `isConfiguredGroup()` are what everything downstream uses. No match is not an
+  error -- that is the ordinary first run, where the group is configured before
+  the invitation has arrived, and the invitation carries the whole id. A failed
+  listing is not an error either: the invitation path resolves it anyway, and
+  refusing to start over one local read would be worse.
+
+  `outbound.Resolve` takes the resolved group id as a parameter now rather than
+  reading `cfg.RouteGroup`, because a configured prefix is not a destination.
+
+  One thing deliberately left half-done, with the reason in the code: the check
+  that a peer route got an account and a group route got a group works on a whole
+  id and not on a prefix, because `address.VersionOf` normalises before reading
+  the marker and so needs all 21 characters. The marker *is* the first character,
+  so re-deriving it here would work -- and would mean copying the bech32 charset
+  into this repository, which is exactly what SRV-31 stopped. The fix belongs in
+  `pkg/address` as a `VersionMarkerOf`, and a test pins the current behaviour so
+  that adding it makes this repository's tests fail rather than quietly leaving
+  the gap open.

@@ -390,45 +390,60 @@ All configuration is via environment variables (there is no config file):
 
 ### Addressing recipients
 
-`FREIZONE_BOT_ROUTE_PEERS` accepts four spellings, all of them forms a person
-actually has in front of them:
+**Every spelling of a Freizone address works, wherever one is configured** — in
+`FREIZONE_BOT_ROUTE_PEERS` and in `FREIZONE_BOT_ROUTE_GROUP` alike. These are all
+forms the app *displays*, so they are all forms somebody will paste:
 
 | Written | Means |
 | --- | --- |
-| `qlfxcdsa42x4xe4gwjcnu` | An account on the bot's own server |
-| `qlfxc-dsa42-x4xe4-gwjcnu` | The same account, in the hyphenated form the app displays |
-| `qlfxcdsa42x4xe4gwjcnu*chat.example.org` | An account on **another** server, reached over `https://` |
+| `qlfxcdsa42x4xe4gwjcnu` | The whole id |
+| `qlfxc-dsa42-x4xe4-gwjcn-u` | The same, hyphenated the way the app shows it for reading |
+| `qlfxc` | The short prefix from the app's compact display — completed for you |
+| `qlfxcdsa42x4xe4gwjcnu*chat.example.org` | On **another** server, reached over `https://` |
 | `qlfxcdsa42x4xe4gwjcnu*http://box.lan:18081` | The same, over a scheme you spelled out yourself |
-| `qlfxcdsa42x4xe4gwjcnu*local` | The bot's own server again — what the address format calls the local form, and equivalent to leaving the `*…` off |
+| `qlfxcdsa42x4xe4gwjcnu*local` | The bot's own server — the format's local form, the same as leaving the `*…` off |
+
+Upper case works too, and so does a bare trailing `*`. A **group** id takes
+exactly the same forms, including a server part: a group is not reached through a
+server — its id derives from its own root key — but the app's compact rendering
+carries one anyway, so it is accepted and discarded rather than refused.
 
 The rules themselves are freizone-server's (`pkg/address`), not this bot's, so
 the app and the bot read an address the same way. A bare host is given
-`https://`, because that is the only scheme a public Freizone server is
-reachable over. A scheme that is written out is left alone —
-that is how a local test server on plain HTTP gets named deliberately rather
-than by accident.
+`https://`, because that is the only scheme a public Freizone server is reachable
+over; a scheme written out is left alone, which is how a local test server on
+plain HTTP gets named deliberately rather than by accident.
 
 The star form is what makes federation reachable at all: without a server, a
 recipient is looked up on the bot's own server, and an account that lives
-elsewhere simply is not there. Nothing warns you about that at send time, which
-is why every recipient is parsed when the configuration is read:
+elsewhere simply is not there.
 
-- a truncated id is refused rather than completed. The app completes a prefix
-  while somebody types into a search box; a configuration file is not typed
-  under time pressure, and a half-written id resolving to whoever happens to
-  match is how an alert reaches a stranger.
-- a group id in `ROUTE_PEERS`, or an account id in `ROUTE_GROUP`, is refused by
-  name. The two differ by one leading character.
-- a recipient listed twice is refused, however differently the two lines are
-  spelled — including one naming a server as `example.org` and the other as
+**A short prefix is completed, not guessed.** For a person, the server completes
+it and the client then verifies the returned id against the returned root key.
+For a group, it is matched against the groups this bot already holds — so before
+an invitation has arrived the prefix is simply kept, and resolved once the group
+is known.
+
+What is still refused, and why:
+
+- **an ambiguous prefix**, naming every match so you can choose. This is the one
+  real risk a prefix carries, and quietly picking one would send your messages to
+  a group you did not mean.
+- **a group id in `ROUTE_PEERS`, or an account id in `ROUTE_GROUP`** — they differ
+  in one leading character, the version marker. Checked on a whole id only for
+  now: reading that marker off a prefix needs a `pkg/address` addition, and
+  copying the character table into this repository is exactly what having one
+  home for the format prevents. A prefix of the wrong kind is caught when it is
+  resolved instead.
+- **a recipient listed twice**, however differently the two lines are spelled —
+  the compact form and the whole id are one person, and so are `example.org` and
   `http://example.org`, since the scheme is how *this bot* reaches that server
-  rather than part of who lives there. Collapsing a duplicate silently would
-  hide the likelier reading, which is that one of the two lines was meant to
-  name somebody else.
-- the same account **on two different servers is two recipients**, and both are
-  kept. In a federated namespace an id alone does not identify anybody.
-- one bad entry fails the whole list. A bot that came up with three of four
-  recipients would page three people and look like it was working.
+  rather than part of who lives there.
+- **one bad entry fails the whole list.** A bot that came up with three of four
+  recipients would deliver to three people and look like it was working.
+
+The same account **on two different servers is two recipients**, and both are
+kept: in a federated namespace an id alone does not identify anybody.
 
 ## Teaching it new commands
 

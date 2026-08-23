@@ -249,7 +249,10 @@ func (m Message) otherLabels() []string {
 // The explicit route wins over the rules deliberately: somebody naming a route
 // is doing something out of the ordinary on purpose, and having configuration
 // override that would make the flag a suggestion.
-func Resolve(cfg *config.Config, route string, labels map[string]string) ([]Destination, error) {
+// groupID is the *resolved* group id, passed in rather than read from cfg: a
+// configured value may be a prefix, and only the daemon -- with an open account
+// and the list of groups it holds -- can turn that into a destination.
+func Resolve(cfg *config.Config, groupID, route string, labels map[string]string) ([]Destination, error) {
 	var out []Destination
 
 	wantGroup := route == "" || route == RouteGroup
@@ -267,8 +270,8 @@ func Resolve(cfg *config.Config, route string, labels map[string]string) ([]Dest
 			wantPeers = slices.Contains(matched.Routes, RoutePeers)
 		}
 	}
-	if wantGroup && cfg.RouteGroup != "" {
-		out = append(out, Destination{Kind: KindGroup, ID: cfg.RouteGroup})
+	if wantGroup && groupID != "" {
+		out = append(out, Destination{Kind: KindGroup, ID: groupID})
 	}
 	if wantPeers {
 		peers, err := config.ParsePeers(cfg.RoutePeers)

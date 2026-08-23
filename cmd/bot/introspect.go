@@ -34,8 +34,8 @@ func (d *daemon) recipientLines() string {
 	b.WriteString("I send to:\n")
 
 	wrote := false
-	if d.cfg.RouteGroup != "" {
-		fmt.Fprintf(&b, "  group  %s\n", address.FormatForDisplay(d.cfg.RouteGroup))
+	if d.configuredGroup() != "" {
+		fmt.Fprintf(&b, "  group  %s\n", address.FormatForDisplay(d.configuredGroup()))
 		wrote = true
 	}
 	// Re-parsed rather than printed as configured, so what is shown is what is
@@ -72,7 +72,7 @@ func (d *daemon) routeLines() string {
 	var b strings.Builder
 
 	configured := make([]string, 0, 2)
-	if d.cfg.RouteGroup != "" {
+	if d.configuredGroup() != "" {
 		configured = append(configured, outbound.RouteGroup)
 	}
 	if len(d.cfg.RoutePeers) > 0 {
