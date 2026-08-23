@@ -304,6 +304,11 @@ refuses to start without a file naming who may use it.
 
 **Teach it new commands** without recompiling, from a file:
 [Teaching it new commands](../README.md#teaching-it-new-commands).
+[`actions.example.json`](actions.example.json) next to this file is a working
+one to start from -- its `/weather` action answers from a keyless public
+endpoint, so it does something the moment you point the setting at it. Copy it
+somewhere of your own before editing, so your configuration is not a file in the
+checkout waiting to be committed.
 
 **Stop a storm from becoming a hundred notifications** —
 `FREIZONE_BOT_DEDUP_WINDOW_MINUTES` and `FREIZONE_BOT_RATE_PER_MINUTE` in the

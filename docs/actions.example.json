@@ -1,0 +1,30 @@
+[
+  {
+    "name": "oncall",
+    "summary": "who is carrying the pager",
+    "reply": "This week: Andreas. Next: Marek.\nRota: https://wiki.example.org/oncall"
+  },
+  {
+    "name": "greet",
+    "summary": "say hello to somebody",
+    "params": [{ "name": "who", "required": true, "pattern": "^[a-zA-Z ]{1,40}$" }],
+    "reply": "Hello {{who}}, welcome."
+  },
+  {
+    "name": "weather",
+    "summary": "the weather somewhere",
+    "params": [
+      {
+        "name": "place",
+        "required": true,
+        "summary": "a city, a place name or an airport code",
+        "pattern": "^[\\p{L}0-9 .,'+-]{2,60}$"
+      }
+    ],
+    "request": {
+      "url": "https://wttr.in/{{place}}?format=4&m&lang=de",
+      "headers": { "Accept": "text/plain" },
+      "timeoutSeconds": 15
+    }
+  }
+]

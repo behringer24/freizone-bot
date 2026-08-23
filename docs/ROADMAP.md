@@ -962,3 +962,19 @@ Status: `done`
   failed the moment the function arrived, naming both cases it had been holding
   open -- and has been replaced by those cases moving into the real check, for
   the peer route, the group route and the allow-list alike.
+
+- 2026-08-23 — the declared actions have a **working example in the
+  repository**: `docs/actions.example.json`, both kinds, driven end to end
+  against a real server rather than written from the documentation. Its
+  `/weather` action answers from a keyless public endpoint, so it does something
+  the moment the setting points at it -- an example that needs a credential
+  before it can be tried is an example nobody tries.
+
+  A test loads it on every build. The example is the first thing anybody copies,
+  and JSON has nowhere to put a warning, so the check has to live where it can
+  fail. It also asserts what the example should *model*: a summary on every
+  action, and a pattern on every parameter that reaches a URL.
+
+  The root `actions.json` stays gitignored. Somebody's own declarations name
+  their endpoints and token paths, and a config file kept in the checkout is one
+  that gets committed by accident -- which is exactly how this one arrived.

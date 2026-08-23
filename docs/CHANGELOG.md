@@ -12,6 +12,15 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Added
+
+* **A working example of a declared actions file**, `docs/actions.example.json`
+  — both kinds, and its `/weather` action answers from a keyless public
+  endpoint, so it does something the moment the setting points at it. An example
+  that needs a credential before it can be tried is an example nobody tries. A
+  test loads it on every build, since the example is the first thing anybody
+  copies and JSON has nowhere to put a warning
+
 ### Fixed
 
 * **The check that a peer route got an account and a group route got a group now
