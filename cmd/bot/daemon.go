@@ -538,15 +538,26 @@ func (d *daemon) maybeJoinGroup(ctx context.Context, res client.ReceiveResult) {
 // prompts for. Doing the check first is what makes that impossible rather than
 // merely unlikely.
 func (d *daemon) dispatch(ctx context.Context, res client.ReceiveResult) {
+	// Each of these used to return in silence, so a message that arrived and was
+	// then dropped left the received-envelope line above and nothing after it.
+	// That is the position an operator is in when a command goes unanswered:
+	// something happened, nothing says what. One line each, at debug, never the
+	// text.
 	if d.interpreter == nil {
-		return // no command surface configured
+		d.logger.Debug("a message arrived but there is no command surface configured",
+			"sender", res.PeerAccountID)
+		return
 	}
 	// A duplicate has already been acted on, and a blocked sender is somebody
 	// the operator cut off -- neither should reach anything below.
 	if res.Duplicate || res.Blocked {
+		d.logger.Debug("not dispatching a message",
+			"sender", res.PeerAccountID, "duplicate", res.Duplicate, "blocked", res.Blocked)
 		return
 	}
 	if res.Content.Kind != client.ContentText && res.Content.Kind != client.ContentGroupText {
+		d.logger.Debug("a message that is not text cannot be a command",
+			"sender", res.PeerAccountID, "kind", res.Content.Kind)
 		return
 	}
 
