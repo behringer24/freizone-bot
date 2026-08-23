@@ -669,3 +669,67 @@ Status: `done`
   among services. And on a farm, one bot per host means every one of those hosts
   can read the group's future traffic, so the shape you want is one bot the
   others reach -- which needs `BOT-08`, or SSH in the meantime.
+
+## Rejected
+
+Things decided against, kept here so they are not proposed again as though new.
+Each was wanted by somebody, including sometimes by me.
+
+### `/addrecipient` and any command that edits the recipient list
+Decided 2026-08-23. `/listrecipients` and `/routes` were built instead, and they
+only read.
+
+The recipient list is **configuration**. A chat command that edited it would
+route around whatever review that configuration has — a unit file in git, an
+Ansible role, a colleague looking at a diff — and the persistence question has
+no good answer: if the change survives a restart the config file no longer says
+who is on the list, and if it does not, the command lied.
+
+The blast radius is the other half. Adding a recipient means every future
+message goes there too, so one command turns "may send this bot a message" into
+"receives everything this bot will ever say" — hostnames, stack traces, whatever
+gets reported — and nothing looks wrong afterwards.
+
+A nonce confirmation was considered and would not have fixed it. A nonce is not
+authentication: it stops a *single* message from changing state, which helps
+against a mistyped command and against a future model-driven interpreter being
+talked into naming the action, and does nothing at all against a commander
+account somebody else is holding.
+
+If runtime change is ever wanted, the shape is re-reading the configuration on a
+signal, where the file stays the single source of truth.
+
+### Pairing a `resolved` notice with its `firing`
+Decided 2026-08-23, was part of `BOT-03`. The pairing key was to come from a
+monitoring tool's payload, and `BOT-08` decided the bot reads no sender's payload
+at all. More fundamentally, firing/resolved is one domain's vocabulary: a build
+result, a digest, a sensor reading and a chat answer have no such pair.
+
+### Operator-scriptable actions (`ACTION_restart=systemctl restart nginx`)
+Decided at `BOT-01`, re-confirmed at `BOT-12`. Remote code execution for whoever
+gets a message past the allow-list, arriving dressed as a convenience feature.
+Anything that must run on the host belongs behind an endpoint that decides for
+itself, which `BOT-12`'s request kind already reaches.
+
+### Go plugins for new actions
+Considered at `BOT-12`. Linux and macOS only, requires an exact toolchain match,
+and a plugin is arbitrary code in a process holding long-lived private keys —
+the same trust as recompiling, with worse ergonomics.
+
+### An adapter for any sender's payload format
+Decided at `BOT-08`. One POST is one message and the body is never parsed. A
+named adapter would make one monitoring tool's vocabulary the centre of gravity
+of a general bridge. It is also what removed the grouping and pairing complexity
+rather than relocating it: batching is only knowable by reading the body.
+
+### HTTP over the unix control socket
+Decided at `BOT-01`. Tempting, since it would have reused freizone-gateway's
+whole API idiom — and it turns "this bot opens no network listener" from a
+property of the code into a property of the configuration. Once the handlers are
+`http.Handler`s a port is two lines away, and `BOT-08` gets decided by accident.
+(`BOT-08` has since been built, deliberately, with its own authentication.)
+
+### The CLI starting a daemon when none is running
+Decided at `BOT-01`. Forks a long-lived, key-holding process into whatever
+context a cron job happened to have: wrong user, no supervision, inherited file
+descriptors — and N concurrent jobs then race for the account lock.

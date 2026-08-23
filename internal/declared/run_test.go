@@ -138,7 +138,7 @@ func TestAnAnswerLargerThanTheLimitIsRefused(t *testing.T) {
 // start with a sentence, not crash with a stack trace.
 func TestANameClashWithABuiltinIsReportedNotPanicked(t *testing.T) {
 	r := action.NewRegistry()
-	action.RegisterBuiltins(r, func() string { return "" }, []string{"a joke"})
+	action.RegisterBuiltins(r, action.Builtins{Status: func() string { return "" }, Jokes: []string{"a joke"}})
 
 	actions, err := Load(write(t, `[{"name":"help","summary":"s","reply":"mine"}]`))
 	if err != nil {
