@@ -19,7 +19,17 @@ Releases are cut as annotated git tags.
   with a complete hardened systemd unit and a Docker equivalent, a
   troubleshooting table, and a list of what catches people out. The README had
   grown into a reference and was unusable as a walkthrough; it keeps the
-  reference and links to the guide
+  reference and links to the guide.
+
+  With a **Windows** section: the same steps in PowerShell, the service wrappers
+  that work where `sc.exe` does not (it starts the binary and then fails, since
+  there is no service control handler), and the three things that behave
+  differently there. The first of those matters: the bot has no way to verify
+  the permissions on the directory holding its private keys, because Windows
+  permissions are ACLs and the mode bits Go synthesises say nothing about them —
+  so that check is disabled and the ACL is yours to set. Windows is a
+  development and testing platform for this bot, not a hardened deployment
+  target, and the guide says so
 
 ### Fixed
 
