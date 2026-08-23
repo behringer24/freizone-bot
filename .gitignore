@@ -9,6 +9,12 @@
 *.so
 *.dylib
 
+# The operator's own declared actions. Sample entries live in the README; a
+# real one names their endpoints and token file paths, which is local
+# configuration and not part of the project.
+/actions.json
+/senders
+
 # The bot's own state: account directory (private keys), media, outbox,
 # control socket. Never committed, and named here rather than only in
 # .dockerignore because a stray `git add -A` is the likelier accident.
