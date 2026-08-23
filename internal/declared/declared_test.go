@@ -196,3 +196,48 @@ func TestPlaceholdersFillIn(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// A realistic declaration, of the shape somebody actually writes: a free
+// keyless endpoint, the parameter going into the URL *path*, and a pattern that
+// has to admit non-ASCII place names.
+//
+// The pattern is the part worth a test. It arrives JSON-escaped (`\p{L}` in the
+// file), and Go's regexp has to see `\p{L}` -- a mistake there would either
+// refuse every umlaut or, worse, compile to something that admits more than it
+// looks like it does.
+func TestARealisticDeclarationWithAUnicodePattern(t *testing.T) {
+	a := loadOne(t, `[{
+		"name": "weather",
+		"summary": "the weather somewhere",
+		"params": [{"name":"place","required":true,"pattern":"^[\\p{L}0-9 .,'+-]{2,60}$"}],
+		"request": {"url":"https://wttr.in/{{place}}?format=4&m&lang=de","timeoutSeconds":15}
+	}]`)
+
+	validate := a.Params[0].validator()
+	if validate == nil {
+		t.Fatal("the pattern was not compiled")
+	}
+	for _, ok := range []string{"Berlin", "München", "New York", "Frankfurt am Main", "Zürich", "L'Aquila", "EDDF"} {
+		if err := validate(ok); err != nil {
+			t.Errorf("%q should be a usable place: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "x", "a;b", "a/b", "a|b", "a$(b)", strings.Repeat("a", 61)} {
+		if err := validate(bad); err == nil {
+			t.Errorf("%q should have been refused", bad)
+		}
+	}
+
+	// The place goes into the path, so it is percent-encoded on the way in and
+	// the request still has to end up at the host the file named.
+	got, err := a.Request.buildURL(map[string]string{"place": "New York"})
+	if err != nil {
+		t.Fatalf("buildURL: %v", err)
+	}
+	if !strings.HasPrefix(got, "https://wttr.in/") {
+		t.Errorf("left the declared host: %q", got)
+	}
+	if strings.Contains(got, " ") {
+		t.Errorf("the space reached the URL unencoded: %q", got)
+	}
+}
