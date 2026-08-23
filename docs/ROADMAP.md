@@ -238,12 +238,13 @@ partial success cannot page the recipients who already have it.
   confidently -- which is not a review process.
 
 ### BOT-03 — Message shaping
-Status: `in progress`
+Status: `done`
 
-Deduplication keys, collapsing a storm into one line with a count, pairing a
-`resolved` notice with the `firing` one it answers, and severity deciding which
-route a message takes. This is what makes the bot usable during a real incident
-rather than during a demonstration.
+Deduplication keys, collapsing a storm into one line with a count, and labels
+deciding which route a message takes.
+
+Pairing a `resolved` notice with the `firing` one it answers was part of this
+item and has been **dropped** — see the 2026-08-23 entry.
 
 - 2026-08-20 — two of the three shipped: **severity routing** and
   **deduplication**. Verified against a real server, with the recipient's own
@@ -272,6 +273,30 @@ rather than during a demonstration.
   judgement the monitoring system upstream usually makes better, having the
   labels and the operator's own rules. This is for when it does not -- a shell
   script, a cron job, a check with none of that.
+
+- 2026-08-23 — **the third piece is dropped, not deferred:** pairing a
+  `resolved` notice with the `firing` one it answers.
+
+  It had been open pending decisions about restart semantics, an unmatched
+  `resolved`, and expiry. What actually settled it is that the ground it stood
+  on is gone. The pairing key was going to come from a monitoring tool's
+  payload -- `fingerprint`, plus a `status` of `firing` or `resolved` -- and
+  `BOT-08` decided the bot reads no sender's payload at all. Without that, the
+  key would have to be guessed, and the only honest guess is "same title, same
+  labels", which is the deduplication key and does not distinguish a thing
+  starting from the same thing ending.
+
+  It could be done by having the sender supply the key -- `?dedup=` already
+  exists and could carry it. Dropped anyway, and this is the reason worth
+  recording: **firing/resolved is one domain's vocabulary.** A build result, a
+  digest, a sensor reading and a chat answer have no such pair, and building the
+  state machine for it would put an alerting concept back at the centre of a
+  bridge that had just been cleared of them. Whoever needs "it is over now"
+  sends a message that says so.
+
+  What replaces it, for anybody who wants the effect: send the resolution as a
+  message with the same labels and a `dedup` key of your own. The bot will not
+  correlate them, and a person reading the chat will.
 
 - 2026-08-20 — **and then the whole shape of a message changed, because the
   first version of the above had quietly turned this into an alerting tool
