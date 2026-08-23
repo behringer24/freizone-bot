@@ -12,6 +12,15 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Fixed
+
+* **The check that a peer route got an account and a group route got a group now
+  holds for a short prefix too.** It read the version marker with `VersionOf`,
+  which normalises first and so needed the whole id — leaving a prefix unchecked
+  here and caught only later, at resolution. freizone-server `v0.24.0` added
+  `VersionMarkerOf`, which reads the marker off one character, so the check
+  covers every spelling: peer route, group route and commander allow-list alike
+
 ## [0.5.0] — 2026-08-23
 
 An afternoon of running the bot against real servers, which found more than the

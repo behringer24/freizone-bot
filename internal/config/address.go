@@ -117,21 +117,17 @@ func ParseGroupID(raw string) (string, error) {
 // mustBe checks the kind of thing an id names: an account belongs in the peer
 // route, a group in the group route, and they differ in one character.
 //
-// Only a **full** id is checked. The version marker is the first character, so a
-// prefix could be checked too -- but `address.VersionOf` normalises before
-// reading it and therefore insists on all 21. Re-deriving the marker here would
-// mean copying the charset into this repository, which is precisely what SRV-31
-// stopped: the address format has one home. So a prefix passes here and is
-// caught when it is resolved instead -- at startup for a group, at the first
-// send for a peer.
-//
-// The proper fix is a `VersionMarkerOf` in `pkg/address` that reads the marker
-// without validating the rest. Then this becomes one call again and the check
-// covers every spelling.
+// That one character is the version marker, and `address.VersionMarkerOf` reads
+// it without validating the rest -- so this holds for every spelling, a short
+// prefix included. It did not for a while: `VersionOf` normalises first and so
+// needs all 21 characters, which left a prefix unchecked here and caught only
+// later, at resolution. Re-deriving the marker locally would have meant copying
+// the charset into this repository, so the fix went where the address format
+// lives (freizone-server `SRV-31`) rather than here.
 func mustBe(id string, group bool) error {
-	version, err := address.VersionOf(id)
+	version, err := address.VersionMarkerOf(id)
 	if err != nil {
-		return nil //nolint:nilerr // a prefix, checked at resolution -- see above
+		return fmt.Errorf("%q has no readable version marker: %w", id, err)
 	}
 	isGroup := version == address.VersionGroup
 	switch {

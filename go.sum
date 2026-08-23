@@ -1,4 +1,4 @@
-github.com/behringer24/freizone-server v0.23.0 h1:b90klablHd0hfuO/d5zPAsJet9Wfo/sHIEIMzvfzPaM=
-github.com/behringer24/freizone-server v0.23.0/go.mod h1:E/TVJmipIaOh9hdG+8UZvUJpb72CS45Pyo49ErQJ07M=
+github.com/behringer24/freizone-server v0.24.0 h1:VzMw0VZpnrsWfVX7r8pjxBkynnPCWm+YVBiSzL0lLmI=
+github.com/behringer24/freizone-server v0.24.0/go.mod h1:E/TVJmipIaOh9hdG+8UZvUJpb72CS45Pyo49ErQJ07M=
 golang.org/x/crypto v0.54.0 h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=
 golang.org/x/crypto v0.54.0/go.mod h1:KWL8ny2AZdGR2cWmzeHrp2azQPGogOv+HeQaVEXC2dk=
