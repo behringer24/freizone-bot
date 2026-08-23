@@ -143,7 +143,11 @@ type Config struct {
 	// entirely -- fail closed, because an operator who has not thought about
 	// who may drive their bot has not decided that everyone may. Never learned
 	// from group membership, which drifts without anybody being told.
-	Commanders []string
+	//
+	// An entry may be a prefix, and carries the server it was written with, both
+	// of which the daemon needs to resolve it into the one account it names -- see
+	// ParseCommanders and cmd/bot/commanders.go.
+	Commanders []address.Address
 
 	// AllowGroupCommands lets commands be given in a group. Off by default: a
 	// command in a group is visible to everyone in it, its answer is too, and
@@ -194,7 +198,6 @@ func Load(getenv func(string) string) (*Config, error) {
 		ControlGroup:  strings.TrimSpace(getenv(envControlGroup)),
 		RouteGroup:    strings.TrimSpace(getenv(envRouteGroup)),
 		RoutePeers:    splitList(getenv(envRoutePeers)),
-		Commanders:    splitList(getenv(envCommanders)),
 		JokesFile:     strings.TrimSpace(getenv(envJokesFile)),
 		ActionsFile:   strings.TrimSpace(getenv(envActionsFile)),
 		WebhookAddr:   strings.TrimSpace(getenv(envWebhookAddr)),
@@ -252,6 +255,14 @@ func Load(getenv func(string) string) (*Config, error) {
 		cfg.ControlSocket = filepath.Join(cfg.StateDir, "control.sock")
 	}
 
+	// Parsed here rather than in validate, which cannot see the raw strings once
+	// the field holds addresses.
+	commanders, err := ParseCommanders(splitList(getenv(envCommanders)))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", envCommanders, err)
+	}
+	cfg.Commanders = commanders
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -293,12 +304,6 @@ func (c *Config) validate() error {
 	// pasted -- hyphenated, upper case, with a server appended. Discarding the
 	// result here, which is what this line used to do, meant validating one
 	// value and then using another.
-	commanders, err := ParseCommanders(c.Commanders)
-	if err != nil {
-		return fmt.Errorf("%s: %w", envCommanders, err)
-	}
-	c.Commanders = commanders
-
 	groupID, err := ParseGroupID(c.RouteGroup)
 	if err != nil {
 		return fmt.Errorf("%s: %w", envRouteGroup, err)
