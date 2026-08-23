@@ -7,6 +7,10 @@ The [README](../README.md) is the reference — every setting, every rule, and t
 reasoning behind them. This is the walkthrough. Where the two disagree, the
 README is right and this file has a bug.
 
+The commands below are for a shell on Linux or macOS. **On Windows the steps are
+the same, the commands differ, and three things behave differently enough to
+matter** — see [On Windows](#on-windows).
+
 **What you need before starting:**
 
 - a Freizone server to register against, and its address
@@ -300,6 +304,93 @@ refuses to start without a file naming who may use it.
 **Stop a storm from becoming a hundred notifications** —
 `FREIZONE_BOT_DEDUP_WINDOW_MINUTES` and `FREIZONE_BOT_RATE_PER_MINUTE` in the
 [configuration reference](../README.md#configuration-reference).
+
+## On Windows
+
+Same seven steps. What changes is how you set the environment, how it becomes a
+service, and three things the bot cannot check for you.
+
+### The commands
+
+PowerShell has no `VAR=value command` prefix, so variables are set and then the
+command runs:
+
+```powershell
+git clone https://github.com/behringer24/freizone-bot
+cd freizone-bot
+go build -o freizone-bot.exe ./cmd/bot
+
+$env:FREIZONE_BOT_SERVER = "https://chat.example.org"
+$env:FREIZONE_BOT_STATE_DIR = ".\data"
+.\freizone-bot.exe run
+```
+
+Registration prints the same banner and exits the same way. Then the group, then
+the route:
+
+```powershell
+$env:FREIZONE_BOT_ROUTE_GROUP = "pczu4-wslmx-3kcen-tudj9-s"
+.\freizone-bot.exe run
+```
+
+**Checking it works has one Windows-specific trap.** `$env:` lives in the window
+that set it, so a second PowerShell window has none of it — and the CLI then
+looks for the socket somewhere else entirely and reports `no daemon at …`. Set it
+again there:
+
+```powershell
+$env:FREIZONE_BOT_STATE_DIR = ".\data"
+.\freizone-bot.exe status
+.\freizone-bot.exe send -title "Hello from the bot" "It works."
+```
+
+Pipelines work as expected:
+
+```powershell
+Get-Content .\build.log -Tail 20 | .\freizone-bot.exe send -title "Build failed"
+```
+
+### Making it a service
+
+**The bot is not a Windows service.** It implements no service control handler,
+so `sc.exe create` will start it and then fail with *"did not respond to the
+start request in a timely fashion"*. Three approaches that do work:
+
+- **Task Scheduler** — the simplest. Trigger *At startup*, *Run whether user is
+  logged on or not*, and under Settings, *restart the task if it fails*.
+  Environment variables cannot be given to a task directly, so point it at a
+  small `start.ps1` that sets them and then calls `run`.
+- **NSSM or WinSW** — a service wrapper. This is the closest equivalent to the
+  systemd unit above: a real service, restart on failure, log redirection.
+- **Docker Desktop** and the image, in which case the container instructions
+  above apply unchanged.
+
+Use a state directory outside the repository — `C:\ProgramData\freizone-bot` is
+the conventional place — and give the account the service runs as write access
+to it.
+
+### Three things that behave differently
+
+- **The bot cannot check the permissions on its own state directory.** On Unix it
+  refuses to start when the directory holding its private keys is readable by
+  group or world. Windows permissions are ACLs, and the mode bits Go synthesises
+  there say nothing about them, so that check is disabled rather than guessing —
+  it would otherwise refuse to start on every machine while proving nothing.
+  **Set the ACL yourself.** The same applies to the HTTP ingress's token file.
+- **`FREIZONE_BOT_CONTROL_GROUP` is refused, not ignored.** Granting a group
+  would be a promise the mode bits there cannot keep, and a setting that appears
+  to grant access without granting it is worse than one that is plainly
+  unavailable. Access to the socket is whatever its directory's ACL inherits.
+  The refusal comes when the socket opens, which on a first run is *after*
+  registration.
+- **The control socket itself works normally.** Windows 10 and later have
+  `AF_UNIX` and Go uses it, so nothing needs a second mechanism. A hardened
+  equivalent would be a named pipe with an explicit security descriptor, which
+  is `BOT-07` and not built.
+
+**So: Windows is a development and testing platform for this bot, not a hardened
+deployment target.** Fine for trying it out and for working on it. For something
+running unattended with long-lived private keys, use Linux.
 
 ## Things that catch people out
 
