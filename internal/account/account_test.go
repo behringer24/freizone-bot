@@ -181,3 +181,63 @@ func TestWriteAddressIsReadableAndPrivate(t *testing.T) {
 		t.Errorf("the address file belongs in the state directory, got %q", cfg.AddressFile())
 	}
 }
+
+// An account belongs to the server it was registered on -- its address is
+// `id*server` and its keys are published there -- so a configured server that
+// disagrees is not a change this can carry out.
+//
+// Refused rather than carried on with, because carrying on is the worst of the
+// three options: the operator sees "account ready" and keeps talking to the
+// server they just stopped naming. This bit for real, with a bot registered on a
+// local test instance and an admin trying to invite it on another server.
+func TestAServerThatDisagreesWithTheStoredOneIsRefused(t *testing.T) {
+	cfg := testConfig(t, "https://chat.example.org")
+	c, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer c.Close() //nolint:errcheck
+
+	id, err := client.NewIdentity("http://box.lan:18080")
+	if err != nil {
+		t.Fatalf("NewIdentity: %v", err)
+	}
+	if err := c.SetIdentity(id); err != nil {
+		t.Fatalf("SetIdentity: %v", err)
+	}
+
+	_, _, err = EnsureRegistered(context.Background(), c, cfg, quietLogger())
+	if err == nil {
+		t.Fatal("a different server must not be silently ignored")
+	}
+	// Both servers named, since the operator has to see which is which to know
+	// what to do about it.
+	for _, want := range []string{"box.lan:18080", "chat.example.org"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error should name %q: %q", want, err)
+		}
+	}
+}
+
+// And the same server written differently is not a move. Without this, adding
+// or dropping the default scheme in the environment would stop the bot.
+func TestTheSameServerSpelledDifferentlyIsNotAMove(t *testing.T) {
+	cfg := testConfig(t, "chat.example.org") // no scheme; Load adds https
+	c, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer c.Close() //nolint:errcheck
+
+	id, err := client.NewIdentity("https://chat.example.org")
+	if err != nil {
+		t.Fatalf("NewIdentity: %v", err)
+	}
+	if err := c.SetIdentity(id); err != nil {
+		t.Fatalf("SetIdentity: %v", err)
+	}
+
+	if _, _, err := EnsureRegistered(context.Background(), c, cfg, quietLogger()); err != nil {
+		t.Errorf("EnsureRegistered: %v", err)
+	}
+}

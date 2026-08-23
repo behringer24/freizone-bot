@@ -16,6 +16,7 @@ import (
 	"runtime"
 
 	"github.com/behringer24/freizone-bot/internal/config"
+	"github.com/behringer24/freizone-server/pkg/address"
 	"github.com/behringer24/freizone-server/pkg/client"
 )
 
@@ -102,6 +103,23 @@ func checkPrivate(dir string) error {
 func EnsureRegistered(ctx context.Context, c *client.Client, cfg *config.Config, logger *slog.Logger) (client.Identity, bool, error) {
 	switch id, err := c.Identity(); {
 	case err == nil:
+		// An account belongs to the server it was registered on: its address is
+		// `id*server`, its keys are published there, and nothing can move it.
+		// So a configured server that disagrees with the stored one is not a
+		// change this can carry out -- and carrying on with the stored value
+		// would be worse than either answer, because the operator would see
+		// "account ready" and keep talking to the server they just stopped
+		// naming.
+		//
+		// SameServer rather than a string comparison, so adding or dropping the
+		// default scheme is not mistaken for a move.
+		if !address.SameServer(id.Server, cfg.Server) {
+			return client.Identity{}, false, fmt.Errorf(
+				"this account lives on %s, but %s says %s. An account cannot move between servers: "+
+					"either put the first one back, or point %s at a fresh directory to register a "+
+					"second account there -- which gets a new address, so it has to be invited again",
+				id.Server, envServerName, cfg.Server, envStateDirName)
+		}
 		return id, false, nil
 	case !errors.Is(err, client.ErrNoIdentity):
 		return client.Identity{}, false, fmt.Errorf("reading the identity: %w", err)
@@ -139,3 +157,11 @@ func WriteAddress(cfg *config.Config, id client.Identity) error {
 	}
 	return nil
 }
+
+// The two variable names this package puts into messages. Named here rather
+// than imported from config, which would be a dependency in the wrong
+// direction -- config knows nothing about accounts and should not have to.
+const (
+	envServerName   = "FREIZONE_BOT_SERVER"
+	envStateDirName = "FREIZONE_BOT_STATE_DIR"
+)
