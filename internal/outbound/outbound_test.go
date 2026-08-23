@@ -1,6 +1,7 @@
 package outbound
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -199,4 +200,38 @@ func TestOneSuppressedMessageReadsAsSingular(t *testing.T) {
 // configured one -- the prefix case is the daemon's and is tested there.
 func resolve(cfg *config.Config, route string, labels map[string]string) ([]Destination, error) {
 	return Resolve(cfg, cfg.RouteGroup, route, labels)
+}
+
+// An unresolved prefix is not a destination.
+//
+// Queued as one, it produced a message that could never be delivered: every
+// attempt failing with "no facts about group <prefix>" until the maximum age
+// dropped it, while `send` had reported success. Seen in the field after
+// thirteen attempts, which is thirteen more than a caller should need to find
+// out that a setting is wrong.
+func TestAnUnresolvedGroupPrefixIsNotADestination(t *testing.T) {
+	cfg := cfgWith(t, "plfxcdsa42x4xe4zr2mju", "")
+
+	_, err := Resolve(cfg, "plfxc", "", nil)
+	if err == nil {
+		t.Fatal("a prefix must not be queued as a destination")
+	}
+	if !errors.Is(err, ErrNoRoute) {
+		t.Errorf("want ErrNoRoute so the caller gets the route exit code, got %v", err)
+	}
+	// The message has to distinguish the two causes, since the fix differs.
+	for _, want := range []string{"plfxc", "the id is wrong", "invitation has not arrived"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error should mention %q: %q", want, err)
+		}
+	}
+
+	// And a resolved id is a destination, which is the case this must not break.
+	dests, err := Resolve(cfg, "plfxcdsa42x4xe4zr2mju", "", nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(dests) != 1 || dests[0].ID != "plfxcdsa42x4xe4zr2mju" {
+		t.Errorf("got %+v", dests)
+	}
 }
