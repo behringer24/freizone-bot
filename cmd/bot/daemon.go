@@ -181,6 +181,11 @@ func runDaemon(args []string) error {
 		ipc.OpSend:   d.handleSend,
 		ipc.OpStatus: d.handleStatus,
 	})
+	stopWebhook, err := serveWebhook(d)
+	if err != nil {
+		return err
+	}
+
 	ctrlErr := make(chan error, 1)
 	go func() { ctrlErr <- ctrl.Serve() }()
 
@@ -209,12 +214,13 @@ func runDaemon(args []string) error {
 
 	// The order is deliberately not the reverse of startup.
 	//
-	// The control socket closes *first*, so nothing new is accepted. Accepting a
+	// Both ingresses close *first*, so nothing new is accepted. Accepting a
 	// message after deciding to shut down would mean telling a caller it is
 	// safely queued when it will not be delivered until after the restart --
 	// which is the one thing an alerting tool must not do quietly.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
+	stopWebhook()
 	if err := ctrl.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("control socket did not shut down cleanly", "error", err)
 	}
@@ -291,16 +297,55 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 		return nil, &ipc.Error{Code: ipc.CodeBadRequest, Message: "nothing to send"}
 	}
 
-	dests, err := outbound.Resolve(d.cfg, body.Route, body.Labels)
-	if err != nil {
-		return nil, &ipc.Error{Code: ipc.CodeNoRoute, Message: err.Error()}
-	}
-
-	msg := outbound.Message{
+	accepted, err := d.accept(outbound.Message{
 		Title:  body.Title,
 		Text:   body.Text,
 		Labels: body.Labels,
 		At:     body.At,
+	}, body.Route, body.DedupKey)
+	switch {
+	case errors.Is(err, outbound.ErrNoRoute):
+		return nil, &ipc.Error{Code: ipc.CodeNoRoute, Message: err.Error()}
+	case errors.Is(err, outbox.ErrFull):
+		return nil, &ipc.Error{Code: ipc.CodeOutboxFull, Message: err.Error()}
+	case err != nil:
+		return nil, err
+	}
+	if accepted.SuppressedBy != "" {
+		return ipc.SendResponse{Suppressed: true, SuppressedBy: accepted.SuppressedBy}, nil
+	}
+
+	if !body.Wait {
+		return ipc.SendResponse{Queued: len(accepted.IDs)}, nil
+	}
+
+	delivered := d.deliverNow(ctx, accepted.IDs)
+	return ipc.SendResponse{Queued: len(accepted.IDs), Delivered: delivered}, nil
+}
+
+// accepted is the outcome of taking a message in.
+type accepted struct {
+	// IDs is one outbox entry per destination, empty when suppressed.
+	IDs []string
+
+	// SuppressedBy names the cap that swallowed this message, or is empty.
+	SuppressedBy string
+}
+
+// accept is every decision between "something produced a message" and "it is
+// durably queued": routing, deduplication, the rate cap, the timestamp.
+//
+// One function for every producer, and that is the point rather than tidiness.
+// The control socket and the webhook receiver are two ways in, and three times
+// in this project a second path has quietly drifted from the first -- the group
+// join, the command dispatch, the invitation catch-up. A webhook that resolved
+// its own routes, or skipped the deduplicator because nobody remembered it,
+// would be the fourth. There is nothing to keep in step because there is one
+// path.
+func (d *daemon) accept(msg outbound.Message, route, dedupKey string) (accepted, error) {
+	dests, err := outbound.Resolve(d.cfg, route, msg.Labels)
+	if err != nil {
+		return accepted{}, err
 	}
 
 	// Deduplication before the rate cap, on purpose. They answer different
@@ -308,10 +353,10 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 	// once" -- and a repeat that the deduper would swallow should not consume a
 	// slot in the rate window on its way to being dropped. The other order would
 	// let one flapping producer exhaust the budget for everything else.
-	if allowed, note := d.deduper.Allow(msg, body.DedupKey); !allowed {
+	if allowed, note := d.deduper.Allow(msg, dedupKey); !allowed {
 		d.logger.Info("message suppressed as a duplicate",
-			"title", body.Title, "labels", labelPairs(body.Labels))
-		return ipc.SendResponse{Suppressed: true, SuppressedBy: "duplicate"}, nil
+			"title", msg.Title, "labels", labelPairs(msg.Labels))
+		return accepted{SuppressedBy: "duplicate"}, nil
 	} else if note != "" {
 		msg.Text += note
 	}
@@ -321,8 +366,8 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 		// Refused, not queued, and reported as such: a cap that silently
 		// swallows is indistinguishable from a bot that has died.
 		d.logger.Warn("message suppressed by the rate limit",
-			"title", body.Title, "labels", labelPairs(body.Labels))
-		return ipc.SendResponse{Suppressed: true, SuppressedBy: "rate"}, nil
+			"title", msg.Title, "labels", labelPairs(msg.Labels))
+		return accepted{SuppressedBy: "rate"}, nil
 	}
 	msg.Text += note
 	if msg.At.IsZero() {
@@ -331,20 +376,11 @@ func (d *daemon) handleSend(ctx context.Context, req ipc.Request) (any, error) {
 
 	ids, err := d.box.Enqueue(msg, dests, time.Now().UTC())
 	if err != nil {
-		if errors.Is(err, outbox.ErrFull) {
-			return nil, &ipc.Error{Code: ipc.CodeOutboxFull, Message: err.Error()}
-		}
-		return nil, err
+		return accepted{}, err
 	}
 	d.logger.Info("message queued",
-		"destinations", len(ids), "title", body.Title, "labels", labelPairs(body.Labels))
-
-	if !body.Wait {
-		return ipc.SendResponse{Queued: len(ids)}, nil
-	}
-
-	delivered := d.deliverNow(ctx, ids)
-	return ipc.SendResponse{Queued: len(ids), Delivered: delivered}, nil
+		"destinations", len(ids), "title", msg.Title, "labels", labelPairs(msg.Labels))
+	return accepted{IDs: ids}, nil
 }
 
 // onReceived is everything the bot itself owes an envelope, once the core has

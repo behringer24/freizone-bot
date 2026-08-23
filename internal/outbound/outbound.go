@@ -26,6 +26,7 @@ package outbound
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -74,6 +75,54 @@ type Destination struct {
 func (d Destination) String() string {
 	return string(d.Kind) + ":" + address.Address{ID: d.ID, Server: d.Server}.String()
 }
+
+// How long a message reaching a chat may be.
+//
+// One answer for every producer -- the CLI, the webhook, a command's reply --
+// because "how much text belongs in a chat message" is one question however the
+// text got here, and two answers to it would only differ by which code path
+// somebody happened to look at.
+//
+// The protocol is not what bounds this: a Freizone server caps a request body at
+// 512 KiB, which is orders of magnitude more than anything here. The bound is a
+// person holding a phone. Generous enough for the case the README documents --
+// piping twenty lines of a log in -- and no more.
+const (
+	MaxMessageChars = 4000
+	MaxMessageLines = 60
+)
+
+// TrimToChatSize shortens text to something readable, and says when it did.
+//
+// Saying so is the part that matters. Silent truncation reads as a complete
+// message, which is worse than a short one: somebody checking a list against
+// reality has no way to know the list ended early.
+func TrimToChatSize(s string) string {
+	cutLines := false
+	if lines := strings.Split(s, "\n"); len(lines) > MaxMessageLines {
+		s = strings.Join(lines[:MaxMessageLines], "\n")
+		cutLines = true
+	}
+	if len(s) > MaxMessageChars {
+		// Back off to a rune boundary, so a truncated message is not invalid
+		// UTF-8 -- which renders as a replacement character on somebody's phone.
+		cut := MaxMessageChars
+		for cut > 0 && s[cut]&0xC0 == 0x80 {
+			cut--
+		}
+		return strings.TrimSpace(s[:cut]) + "\n\n(cut short)"
+	}
+	if cutLines {
+		return s + "\n\n(cut short)"
+	}
+	return s
+}
+
+// ErrNoRoute reports that a message has nowhere to go -- an unknown route name,
+// a route that is not configured, or no route at all. A sentinel because two
+// producers now map it onto their own vocabulary: an exit code for the CLI, a
+// status code for the webhook.
+var ErrNoRoute = errors.New("no route")
 
 // Route names a configured set of destinations.
 const (
@@ -157,13 +206,17 @@ func (m Message) Render(now time.Time) string {
 		b.WriteString(strings.Join(rest, " "))
 	}
 
+	// Trimmed here, before the late note is appended, so that a message long
+	// enough to be cut does not lose the one line explaining why it is old.
+	out := TrimToChatSize(b.String())
+
 	// Late is anything more than a couple of minutes old by the time it goes.
 	// Said plainly rather than as a bare timestamp: a reader seeing something
 	// old needs to know it is old, not to do arithmetic.
 	if !m.At.IsZero() && now.Sub(m.At) > 2*time.Minute {
-		b.WriteString(fmt.Sprintf("\n\n(from %s, delivered late)", m.At.UTC().Format("2006-01-02 15:04:05 UTC")))
+		out += fmt.Sprintf("\n\n(from %s, delivered late)", m.At.UTC().Format("2006-01-02 15:04:05 UTC"))
 	}
-	return b.String()
+	return out
 }
 
 // otherLabels is every label except the two the layout already showed, as
@@ -203,7 +256,7 @@ func Resolve(cfg *config.Config, route string, labels map[string]string) ([]Dest
 	wantPeers := route == "" || route == RoutePeers
 
 	if route != "" && !wantGroup && !wantPeers {
-		return nil, fmt.Errorf("unknown route %q (known: %s, %s)", route, RouteGroup, RoutePeers)
+		return nil, fmt.Errorf("%w: unknown route %q (known: %s, %s)", ErrNoRoute, route, RouteGroup, RoutePeers)
 	}
 
 	var matched *config.RouteRule
@@ -229,17 +282,17 @@ func Resolve(cfg *config.Config, route string, labels map[string]string) ([]Dest
 	if len(out) == 0 {
 		switch {
 		case route != "":
-			return nil, fmt.Errorf("route %q is not configured", route)
+			return nil, fmt.Errorf("%w: route %q is not configured", ErrNoRoute, route)
 		case matched != nil:
 			// Distinguished from "nothing configured at all", because the fix is
 			// different: here a routing rule and the configured routes disagree,
 			// and an operator needs to know which of the two to change.
 			return nil, fmt.Errorf(
-				"the rule %s=%s sends to a route this bot has no destination for -- "+
+				"%w: the rule %s=%s sends to a route this bot has no destination for -- "+
 					"check FREIZONE_BOT_ROUTE_RULES against the configured routes",
-				matched.Label, matched.Value)
+				ErrNoRoute, matched.Label, matched.Value)
 		default:
-			return nil, fmt.Errorf("no route configured")
+			return nil, fmt.Errorf("%w: none configured", ErrNoRoute)
 		}
 	}
 	return out, nil
