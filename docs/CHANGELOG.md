@@ -12,6 +12,13 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-23
+
+The bot grows a second way in, and one general rule about how much text belongs
+in a chat message. Both were shaped by the same correction: this is a bridge
+between Freizone and other systems, and operations alerting is one use of it
+rather than its shape.
+
 ### Added
 
 * **An HTTP ingress, off by default (`BOT-08`).** For anything that can only
