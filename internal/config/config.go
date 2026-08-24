@@ -45,6 +45,7 @@ const (
 	envAllowGroupCommand = "FREIZONE_BOT_ALLOW_GROUP_COMMANDS"
 	envJokesFile         = "FREIZONE_BOT_JOKES_FILE"
 	envActionsFile       = "FREIZONE_BOT_ACTIONS_FILE"
+	envForgetInvites     = "FREIZONE_BOT_FORGET_INVITES_AFTER_HOURS"
 	envWebhookAddr       = "FREIZONE_BOT_WEBHOOK_ADDR"
 	envWebhookTokens     = "FREIZONE_BOT_WEBHOOK_TOKENS_FILE"
 	envAcceptInvites     = "FREIZONE_BOT_ACCEPT_GROUP_INVITES"
@@ -86,6 +87,15 @@ const (
 	// none of the four maintenance calls would ever run again. The prekey pool
 	// would drain toward zero with nothing to notice.
 	defaultMaintenanceIntervalMinutes = 360
+
+	// Thirty days before an unanswered invitation is dropped. Generous on
+	// purpose: the window it protects is "somebody invited the bot, and the
+	// operator configures that group later", which is the order the first run
+	// leads them into -- and closing it early is not recoverable by inviting
+	// again, since from the group's side this bot is already invited. Thirty
+	// days is longer than any real gap between those two actions and still
+	// bounds what an unsolicited invitation can accumulate to.
+	defaultForgetInvitesHours = 24 * 30
 )
 
 // Config holds all bot configuration.
@@ -164,6 +174,11 @@ type Config struct {
 	// JokesFile replaces the built-in set for the joke action. Empty keeps the
 	// built-in one.
 	JokesFile string
+
+	// ForgetInvitesAfter is how long the facts of an unanswered invitation are
+	// kept before being dropped. Zero keeps them for ever. See
+	// cmd/bot/group.go for why this waits rather than forgetting at once.
+	ForgetInvitesAfter time.Duration
 
 	// ActionsFile declares actions in a file instead of in Go -- a fixed reply,
 	// or an HTTP request to something that already exists. See internal/declared.
@@ -246,6 +261,13 @@ func Load(getenv func(string) string) (*Config, error) {
 		return nil, err
 	}
 	cfg.DedupWindow = time.Duration(dedupMinutes) * time.Minute
+
+	// Zero is meaningful here too: keep every invitation for ever.
+	forgetHours, err := nonNegativeInt(getenv, envForgetInvites, defaultForgetInvitesHours)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ForgetInvitesAfter = time.Duration(forgetHours) * time.Hour
 
 	if cfg.RouteRules, err = parseRouteRules(getenv(envRouteRules)); err != nil {
 		return nil, err
