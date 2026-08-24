@@ -999,3 +999,53 @@ Status: `done`
   Every internal anchor in both files resolves, and every fenced block in both
   is paired -- an unclosed one would swallow the rest of the document, which is
   the failure that would look exactly like this one did.
+
+### BOT-19 — Forgetting invitations nobody answered
+Status: `done`
+
+An invitation to a group the operator did not configure is ignored -- but its
+facts are already on disk by then, folded when the envelope was handled, and
+nothing ever removed them. A bot whose address is known accumulates one fact set
+per unsolicited invitation, without bound.
+
+- 2026-08-24 — `forgetStaleInvitations`, run from the periodic upkeep.
+
+  **The interesting part is the delay, not the deletion.** Forgetting an ignored
+  invitation the moment it is ignored was the obvious design and would have
+  reintroduced `BOT-01`'s worst bug: an invitation is announced exactly once, and
+  `joinConfiguredGroupIfInvited` exists precisely because of that -- it reads the
+  facts already held so that "invite first, configure the group afterwards"
+  works, which is the order the first run leads an operator into. Worse, the
+  damage would not be recoverable by doing the obvious thing: from the group's
+  side the bot is *already* invited, so inviting it again is idempotent and
+  announces nothing. The operator would have to remove it and invite it afresh,
+  with nothing to suggest either step.
+
+  So an invitation is kept 30 days by default and then dropped
+  (`FREIZONE_BOT_FORGET_INVITES_AFTER_HOURS`, `0` for never). Generous enough to
+  cover any real gap between the two actions, bounded enough that a stranger
+  cannot grow this without limit.
+
+  **No new state was needed to know the age.** `group.Member.AddedAt` already
+  records when this account was added, so the facts date themselves -- the first
+  design had a `<state>/ignored-groups.json` mapping ids to first-seen, which
+  would have been a second thing to keep in step with the first.
+
+  Three things it never touches, each a different bug if it did: the configured
+  group (however old, and recognised through a configured *prefix* too); a group
+  this bot has joined, which is the one thing `ForgetGroup`'s own documentation
+  says never to do, since the others keep sending and an arriving message would
+  rebuild a chat whose facts are gone; and a group this bot is not in the member
+  list of at all, which is removal rather than an unanswered invitation and is
+  not this function's business.
+
+  Checked first that this is safe at all: `joinedMembers` skips `!m.Joined`, so a
+  pending invitee is sent nothing, which is what makes forgetting an unaccepted
+  invitation free of the hazard that documentation warns about.
+
+  Every drop is logged with the group and the invitation's age. If somebody was
+  about to configure that group, this line is the only thing that will tell them
+  why nothing was waiting.
+
+  Negative controls on the two guards whose failure destroys data -- the joined
+  group and the configured one -- both fail the tests when removed.

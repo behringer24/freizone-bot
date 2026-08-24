@@ -12,6 +12,19 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Added
+
+* **Invitations nobody answered are forgotten after a while (`BOT-19`).** An
+  invitation to a group you did not configure is ignored, but its facts stay on
+  disk, so a bot whose address is known accumulates one fact set per unsolicited
+  invitation. They are dropped after 30 days by default
+  (`FREIZONE_BOT_FORGET_INVITES_AFTER_HOURS`, `0` for never), and every drop is
+  logged with the group and the age. Deliberately not immediate: an invitation is
+  announced exactly once, so forgetting early would close the door on "invite
+  first, configure the group afterwards" — and that door does not reopen by
+  inviting again. Never applied to the configured group, to a group the bot has
+  joined, or to one it is not a member of.
+
 ## [0.5.1] — 2026-08-24
 
 Documentation, mostly — the README stopped being two documents at once — plus

@@ -138,6 +138,7 @@ func runDaemon(args []string) error {
 		acceptInvitation: c.AcceptGroupInvitation,
 		membershipOf:     c.GroupMembership,
 		knownGroups:      c.Groups,
+		forgetGroup:      c.ForgetGroup,
 		resolvePeer:      c.ResolvePeer,
 		id:               id,
 	}
@@ -291,6 +292,10 @@ type daemon struct {
 	// knownGroups lists the groups this bot holds, for resolving a configured
 	// prefix into a whole group id. Injectable for the same reason again.
 	knownGroups func() ([]string, error)
+
+	// forgetGroup drops a group's facts. Injectable so the decision about which
+	// ones to drop is testable without a store to delete from.
+	forgetGroup func(groupID string) error
 
 	// groupID is the resolved full id of the configured group, empty until it is
 	// known -- see group.go. Read through configuredGroup(), never directly.
@@ -917,7 +922,13 @@ func runUpkeep(ctx context.Context, d *daemon, wanted <-chan struct{}) <-chan st
 }
 
 func (d *daemon) upkeep(ctx context.Context) {
-	// The queue first: it holds everything that arrived while nothing was
+	// Unanswered invitations, before anything else: it needs no network, and a
+	// long-running bot is exactly where they pile up -- an invitation arrives,
+	// is ignored, and nothing ever looked at it again. See group.go for why
+	// this waits rather than forgetting one the moment it is ignored.
+	d.forgetStaleInvitations(time.Now())
+
+	// The queue: it holds everything that arrived while nothing was
 	// listening, and leaving it would let it grow to the server's per-device
 	// cap -- past which every sender to this bot starts being refused.
 	report, err := d.client.Drain(ctx, client.ReceiveOptions{})
