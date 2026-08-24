@@ -12,6 +12,11 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-08-24
+
+Documentation, mostly — the README stopped being two documents at once — plus
+one check that now holds for a spelling it had been skipping.
+
 ### Changed
 
 * **The README is a reference again, and the walkthrough lives in the guide.** It
