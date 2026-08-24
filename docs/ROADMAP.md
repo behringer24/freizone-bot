@@ -978,3 +978,24 @@ Status: `done`
   The root `actions.json` stays gitignored. Somebody's own declarations name
   their endpoints and token paths, and a config file kept in the checkout is one
   that gets committed by accident -- which is exactly how this one arrived.
+
+- 2026-08-23 — **the README was split rather than trimmed.** It had grown to 578
+  lines and was two documents in one: a walkthrough and a reference, interleaved,
+  with the container-or-binary decision sitting 230 lines after the install
+  steps. Now that `docs/SETUP.md` is the walkthrough, the README keeps only what
+  a reference owes -- what each thing is, what it refuses to do, and why.
+
+  Out: `Getting it running` and `Putting it in a group`, both of which the guide
+  covers step by step. Their *reasoning* stayed, as a `Groups` section: that the
+  bot answers its own invitation, that either order works, and that an
+  uninvited group is ignored rather than declined. The `systemd OnFailure=`
+  example moved into the guide, where a link had been pointing at it anyway.
+  `Local development` turned out to be a duplicate of `Development` two hundred
+  lines further down, and `Development` claimed there was no CI -- untrue since
+  `v0.2.0`.
+
+  Anchors were the risk, so they were checked rather than hoped for: three are
+  referenced from the guide, and the sections carrying them kept their names.
+  Every internal anchor in both files resolves, and every fenced block in both
+  is paired -- an unclosed one would swallow the rest of the document, which is
+  the failure that would look exactly like this one did.

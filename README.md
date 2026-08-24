@@ -4,7 +4,7 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Why this exists:** operations alerting is the first thing it does. A monitoring system that pages you through Slack or Telegram hands every alert — hostnames, internal addresses, stack traces, sometimes a credential in a log line — to a third party. Freizone is end-to-end encrypted and self-hosted, so the same alert reaches the same phone without anyone in between being able to read it. Alerting is the first capability rather than the shape of the whole thing: the same daemon is where a server-assistant, a command bot and later integrations live.
 
-**New here?** [`docs/SETUP.md`](docs/SETUP.md) walks it through from nothing; this file is the reference.
+**This file is the reference** — what each thing is, what it refuses to do, and why. To *set one up*, read [`docs/SETUP.md`](docs/SETUP.md) instead: one path, in order, from nothing to a bot that delivers, on Linux and on Windows.
 
 **Status:** `BOT-01` through `BOT-03`, `BOT-05`, `BOT-08` and `BOT-12` work, driven end to end against a real server rather than only in tests: the daemon registers its own account, joins the group it was configured for, delivers messages handed to it over a local socket or an optional HTTP ingress with a durable queue behind them, and answers commands from an allow-listed sender. Not there yet: a server-assistant role (`BOT-09`), interpretation by a model (`BOT-10`). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -26,51 +26,13 @@ An automation daemon for [Freizone](https://github.com/behringer24/freizone-serv
 
 **Incoming messages are untrusted input from anyone** who knows the bot's address, and every group member does. Commands are therefore off unless an allow-list is configured, a sender who is not on it gets no reply at all, and the authorization check runs *before* any interpretation of the text — which is what will keep a future model-driven interpreter from being promptable by strangers.
 
-## Getting it running
+## Groups
 
-> **Setting one up for the first time?** [`docs/SETUP.md`](docs/SETUP.md) is the
-> walkthrough: one path, in order, from nothing to a bot that delivers, with a
-> complete systemd unit and a Docker equivalent. **This file is the reference** —
-> every setting and the reasoning behind it — which is a different thing to read.
+The bot **accepts an invitation to its configured group by itself** — naming the group in the configuration is what asks for it. Either order works: invite first and configure afterwards, and it finishes the invitation on its next start, because an invitation is announced only once and it reads the facts it already holds rather than waiting to be told again.
 
-You need a Freizone server to register against — any instance, including one you run locally for the purpose. The bot needs its address, and an invite code if that server's registration policy requires one.
+Invitations to any *other* group are left unanswered unless `FREIZONE_BOT_ACCEPT_GROUP_INVITES` says otherwise. An invitation you did not ask for is somebody else deciding what your bot is a member of, and from then on it holds that group's facts and receives its traffic. It never *declines* either — declining is a signed fact that says something, and the honest state is that nobody asked this bot to be there.
 
-```sh
-FREIZONE_BOT_SERVER=https://chat.example.org \
-FREIZONE_BOT_STATE_DIR=./data \
-freizone-bot run
-```
-
-The first start registers an account and prints the address it got, then stops — because there is nowhere to send yet:
-
-```
-  This bot registered as:
-
-      qkh74-xlzec-2an4v-th086-f*chat.example.org
-
-  Invite that address to the group it should post in.
-```
-
-That address is the one thing you have to act on: invite it to the group it should post in, or add it as a contact. It is also written to `<state>/address`, and `freizone-bot whoami` prints it later — including while the daemon is running, since it reads that file rather than opening the account. Those two print it without the grouping hyphens, which are only there to help you read it off a screen; both forms mean the same address and either can be pasted anywhere.
-
-Then give it a route and start it for real:
-
-```sh
-FREIZONE_BOT_SERVER=https://chat.example.org \
-FREIZONE_BOT_STATE_DIR=./data \
-FREIZONE_BOT_ROUTE_GROUP=qgroupid… \
-freizone-bot run
-```
-
-A daemon with no route refuses to start rather than warning: one that accepts messages with nowhere to put them is worse than one that is plainly not configured.
-
-### Putting it in a group
-
-Create the group in the app, put its id in `FREIZONE_BOT_ROUTE_GROUP`, and invite the bot to it. **It accepts that invitation by itself** — naming the group in the configuration is what asks for it.
-
-The order does not matter. Invite first and configure afterwards, and the bot finishes the invitation on its next start: an invitation is only announced once, so it reads the facts it already holds rather than waiting to be told again.
-
-Invitations to any *other* group are left unanswered unless you set `FREIZONE_BOT_ACCEPT_GROUP_INVITES=true`. That is deliberate: an invitation you did not ask for is somebody else deciding what your bot is a member of, and from then on it holds that group's facts and receives its traffic. The bot never declines either — declining is a signed fact that says something, and the honest state is "nobody asked this bot to be there".
+A group is not reached through a server: its id derives from its own root key, so the bot's own server does not have to be the group's. What has to hold is reachability — both servers federating, and each able to reach the other.
 
 ## Sending a message
 
@@ -153,24 +115,113 @@ Commands in groups are off unless you switch them on. In a one-to-one chat the l
 
 The interpretation of a message is deliberately a **replaceable layer**, and the authorization check runs *before* it. That ordering is the most important rule in this repository: today the interpreter is a parser and it looks academic, but the moment a model sits there (`BOT-10`), an interpreter that sees everything is one that anyone knowing this bot's address can write prompts for. The layer below it only ever executes actions that already exist, with parameters its own specification validated — a model can *name* an action, never invent one.
 
-### With systemd
+## Teaching it new commands
 
-Three lines, and every failing service on the host pages you:
+Without recompiling: `FREIZONE_BOT_ACTIONS_FILE` points at a JSON file of
+declared actions. Two kinds.
 
-```ini
-[Unit]
-OnFailure=freizone-alert@%n.service
+[`docs/actions.example.json`](docs/actions.example.json) is a working file, not a
+sketch — both kinds, and the `/weather` action in it answers from a keyless
+public endpoint, so it works the moment you point the setting at it. Copy it
+somewhere of your own before editing; a file you keep in the checkout is one you
+will eventually commit by accident (`actions.json` at the root is gitignored for
+that reason). A test loads it on every build, since the example is the first
+thing anybody copies and JSON has nowhere to put a warning.
+
+**A fixed reply.** Nothing is executed, so this adds no attack surface at all —
+and it covers more than it sounds like it does: rotas, runbook links, canned
+answers, anything somebody currently has to remember.
+
+```json
+[
+  {
+    "name": "oncall",
+    "summary": "who is carrying the pager",
+    "reply": "This week: Andreas. Next: Marek.\nRota: https://wiki.example.org/oncall"
+  },
+  {
+    "name": "greet",
+    "summary": "say hello to somebody",
+    "params": [{ "name": "who", "required": true, "pattern": "^[a-zA-Z ]{1,40}$" }],
+    "reply": "Hello {{who}}, welcome."
+  }
+]
 ```
 
-```ini
-# /etc/systemd/system/freizone-alert@.service
-[Service]
-Type=oneshot
-EnvironmentFile=/etc/freizone-bot.env
-ExecStart=/usr/local/bin/freizone-bot send -severity critical -title "%i failed" -source %H
+**An HTTP request**, whose answer becomes the reply. The logic stays in the
+system that already has it — a CI server, a runbook service, a home-automation
+box — and the bot holds a URL and a token rather than a shell.
+
+```json
+[
+  {
+    "name": "deploys",
+    "summary": "the last few deploys",
+    "params": [{ "name": "count", "pattern": "^[0-9]{1,2}$" }],
+    "request": {
+      "url": "https://ci.example.org/api/deploys?limit={{count}}",
+      "headers": { "Accept": "application/json" },
+      "tokenFile": "/run/secrets/ci-token",
+      "field": "result.items",
+      "timeoutSeconds": 10
+    }
+  }
+]
 ```
 
-Nagios, Icinga, Zabbix, Sensu, cron and CI steps all take the same shape — anything that can run a command. Anything that can only POST goes through the [HTTP ingress](#the-http-ingress) instead.
+Commands are still off until `FREIZONE_BOT_COMMANDERS` names somebody — a
+declarations file on its own reaches nobody, and the daemon says so at startup
+rather than coming up looking fine.
+
+### Does the endpoint have to answer in a particular format?
+
+**No.** Requiring one would have undone the point: an endpoint written for this
+bot is an endpoint somebody had to write for this bot, which is barely better
+than recompiling. So the bot takes what arrives.
+
+| What comes back | What reaches the chat |
+| --- | --- |
+| `text/plain` | the body, trimmed |
+| JSON string | the string |
+| JSON object | sorted `key=value` lines — the same way labels are rendered |
+| JSON list | one line per entry; a list of objects collapses each onto one line |
+| any JSON, with `field` set | whatever that dotted path selects |
+| a non-2xx status | a failure, not a reply: `503 Service Unavailable: upstream is down` |
+| HTML, an image, a blob | described, not pasted: status, type, size |
+
+`field` is for when the interesting part is buried. Everything else needs
+nothing from the other side.
+
+Two of those rows are refusals rather than renderings, and both are deliberate.
+An HTML error page is the **likeliest** thing a misconfigured endpoint returns,
+and one pasted into a group transcript cannot be un-sent. Long answers are cut
+at 25 lines or 2000 characters and **say** they were cut — a truncated list that
+looks complete is worse than a short one, particularly for a list somebody is
+checking against.
+
+The answer arrives with the action's name in front of it. That is not
+decoration: the text below it was written by another system, an endpoint that
+reflects any of its input is one an outsider can write through, and without that
+line a group member cannot tell what the bot *found* from what the bot is
+*saying*.
+
+### What a declaration cannot do
+
+**Run a command.** There is no `"exec"`, and `"restart": "systemctl restart
+nginx"` is the obvious third kind that is not here. A shell string in a
+configuration file is remote code execution for anybody who gets a message past
+the allow-list, and it would arrive looking like a convenience feature. Anything
+that has to run on this host belongs behind an endpoint that decides for itself
+whether to do it — the same boundary you would want anyway, and one the request
+kind above already reaches.
+
+Two things the request kind will not do either. A parameter cannot move a
+request somewhere else: values are percent-encoded going in, *and* the filled-in
+URL has to still resolve to the scheme and host the file named — checked again
+on redirects, which are capped at three and refused across hosts. A bot sits
+inside a network and carries a token, so where its requests go is worth two
+locks rather than one. And a `pattern` is anchored even when written unanchored,
+because `[0-9]+` on its own matches a substring and would accept `12; and more`.
 
 ## The HTTP ingress
 
@@ -433,114 +484,6 @@ What is still refused, and why:
 
 The same account **on two different servers is two recipients**, and both are
 kept: in a federated namespace an id alone does not identify anybody.
-
-## Teaching it new commands
-
-Without recompiling: `FREIZONE_BOT_ACTIONS_FILE` points at a JSON file of
-declared actions. Two kinds.
-
-[`docs/actions.example.json`](docs/actions.example.json) is a working file, not a
-sketch — both kinds, and the `/weather` action in it answers from a keyless
-public endpoint, so it works the moment you point the setting at it. Copy it
-somewhere of your own before editing; a file you keep in the checkout is one you
-will eventually commit by accident (`actions.json` at the root is gitignored for
-that reason). A test loads it on every build, since the example is the first
-thing anybody copies and JSON has nowhere to put a warning.
-
-**A fixed reply.** Nothing is executed, so this adds no attack surface at all —
-and it covers more than it sounds like it does: rotas, runbook links, canned
-answers, anything somebody currently has to remember.
-
-```json
-[
-  {
-    "name": "oncall",
-    "summary": "who is carrying the pager",
-    "reply": "This week: Andreas. Next: Marek.\nRota: https://wiki.example.org/oncall"
-  },
-  {
-    "name": "greet",
-    "summary": "say hello to somebody",
-    "params": [{ "name": "who", "required": true, "pattern": "^[a-zA-Z ]{1,40}$" }],
-    "reply": "Hello {{who}}, welcome."
-  }
-]
-```
-
-**An HTTP request**, whose answer becomes the reply. The logic stays in the
-system that already has it — a CI server, a runbook service, a home-automation
-box — and the bot holds a URL and a token rather than a shell.
-
-```json
-[
-  {
-    "name": "deploys",
-    "summary": "the last few deploys",
-    "params": [{ "name": "count", "pattern": "^[0-9]{1,2}$" }],
-    "request": {
-      "url": "https://ci.example.org/api/deploys?limit={{count}}",
-      "headers": { "Accept": "application/json" },
-      "tokenFile": "/run/secrets/ci-token",
-      "field": "result.items",
-      "timeoutSeconds": 10
-    }
-  }
-]
-```
-
-Commands are still off until `FREIZONE_BOT_COMMANDERS` names somebody — a
-declarations file on its own reaches nobody, and the daemon says so at startup
-rather than coming up looking fine.
-
-### Does the endpoint have to answer in a particular format?
-
-**No.** Requiring one would have undone the point: an endpoint written for this
-bot is an endpoint somebody had to write for this bot, which is barely better
-than recompiling. So the bot takes what arrives.
-
-| What comes back | What reaches the chat |
-| --- | --- |
-| `text/plain` | the body, trimmed |
-| JSON string | the string |
-| JSON object | sorted `key=value` lines — the same way labels are rendered |
-| JSON list | one line per entry; a list of objects collapses each onto one line |
-| any JSON, with `field` set | whatever that dotted path selects |
-| a non-2xx status | a failure, not a reply: `503 Service Unavailable: upstream is down` |
-| HTML, an image, a blob | described, not pasted: status, type, size |
-
-`field` is for when the interesting part is buried. Everything else needs
-nothing from the other side.
-
-Two of those rows are refusals rather than renderings, and both are deliberate.
-An HTML error page is the **likeliest** thing a misconfigured endpoint returns,
-and one pasted into a group transcript cannot be un-sent. Long answers are cut
-at 25 lines or 2000 characters and **say** they were cut — a truncated list that
-looks complete is worse than a short one, particularly for a list somebody is
-checking against.
-
-The answer arrives with the action's name in front of it. That is not
-decoration: the text below it was written by another system, an endpoint that
-reflects any of its input is one an outsider can write through, and without that
-line a group member cannot tell what the bot *found* from what the bot is
-*saying*.
-
-### What a declaration cannot do
-
-**Run a command.** There is no `"exec"`, and `"restart": "systemctl restart
-nginx"` is the obvious third kind that is not here. A shell string in a
-configuration file is remote code execution for anybody who gets a message past
-the allow-list, and it would arrive looking like a convenience feature. Anything
-that has to run on this host belongs behind an endpoint that decides for itself
-whether to do it — the same boundary you would want anyway, and one the request
-kind above already reaches.
-
-Two things the request kind will not do either. A parameter cannot move a
-request somewhere else: values are percent-encoded going in, *and* the filled-in
-URL has to still resolve to the scheme and host the file named — checked again
-on redirects, which are capped at three and refused across hosts. A bot sits
-inside a network and carries a token, so where its requests go is worth two
-locks rather than one. And a `pattern` is anchored even when written unanchored,
-because `[0-9]+` on its own matches a substring and would accept `12; and more`.
 
 ## Development
 

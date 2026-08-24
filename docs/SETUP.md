@@ -291,8 +291,28 @@ whatever does the sending.
 Everything below is optional and independent. Each links to the reference.
 
 **Page yourself when a service fails** — three lines, and every failing unit on
-the machine reports itself:
-[With systemd](../README.md#with-systemd).
+the machine reports itself. In the unit you want to hear about:
+
+```ini
+[Unit]
+OnFailure=freizone-alert@%n.service
+```
+
+And once, for all of them:
+
+```ini
+# /etc/systemd/system/freizone-alert@.service
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/freizone-bot/env
+ExecStart=/usr/local/bin/freizone-bot send -severity critical -title "%i failed" -source %H
+```
+
+`%n` is the failing unit's name and `%H` the host, so the message says which
+service on which machine without either being written down twice. Nagios,
+Icinga, Zabbix, Sensu, cron and CI steps all take the same shape — anything that
+can run a command. Anything that can only POST goes through the
+[HTTP ingress](../README.md#the-http-ingress) instead.
 
 **Accept messages over HTTP**, for anything that can only POST:
 [The HTTP ingress](../README.md#the-http-ingress). Off by default, and it
