@@ -1,4 +1,4 @@
- Every spelling is accepted, including a short prefix. A prefix is **resolved once at startup** into the exact account it names -- the server completing it, the client verifying the answer against the returned root key -- so the check itself always compares whole ids and never a prefix against a sender. That is sound because the server refuses to register an account whose id starts like an existing one, so a prefix names at most one account there. Uniqueness is per server, which is why a `*server` part is kept and used for the lookup. An entry that cannot be resolved stops the daemon rather than being skipped: an allow-list that quietly lost an entry is a bot that silently answers nobody. Whole ids need no lookup, so a bot configured with them still starts while its server is unreachable.# Freizone Bot
+# Freizone Bot
 
 An automation daemon for [Freizone](https://github.com/behringer24/freizone-server). It holds a Freizone account of its own and connects Freizone to other systems in **both directions**: something happens elsewhere and becomes a message, or a message causes something to happen.
 
@@ -351,14 +351,6 @@ read-everything problem is not a bot feature: it is broadcast
 where recipients do not become members and do not see each other. That is the
 deployment where it earns its keep.
 
-## Local development
-
-```sh
-go build ./...
-go vet ./...
-go test ./...
-```
-
 ## Configuration reference
 
 All configuration is via environment variables (there is no config file):
@@ -376,7 +368,7 @@ All configuration is via environment variables (there is no config file):
 | `FREIZONE_BOT_ACCEPT_GROUP_INVITES` | `false` | Whether the bot accepts invitations to *other* groups too. Off by default: an invitation you did not ask for is a stranger deciding what your bot is a member of, and from then on it holds that group’s facts and receives its traffic. |
 | `FREIZONE_BOT_ROUTE_PEERS` | – | Comma-separated recipients messages are sent to individually — see [Addressing recipients](#addressing-recipients) for the accepted spellings. **Independent of the group route, not an alternative to it** — with both set, a message goes to both, which is how escalation is expressed: the team channel *and* whoever is carrying the pager. |
 | `FREIZONE_BOT_ROUTE_RULES` | – | Narrows where a message goes based on its **labels**, in order — the first matching rule decides. `severity:critical=group+peers,kind:digest=group` means a critical thing reaches the channel and the pager while a daily digest only goes to the channel. A message matching no rule goes everywhere configured, so a partial set never silently drops anything. An explicit `-route` wins over this. |
-| `FREIZONE_BOT_COMMANDERS` | – (off) | Comma-separated account ids that may command the bot. **Empty disables the command surface entirely** — the bot will not answer anybody. Deliberately not "whoever is in the group": group membership changes without you being told, a configured list changes when you change it. |
+| `FREIZONE_BOT_COMMANDERS` | – (off) | Comma-separated accounts that may command the bot. **Empty disables the command surface entirely** — the bot will not answer anybody. Deliberately not "whoever is in the group": group membership changes without you being told, a configured list changes when you change it. Every spelling is accepted, a short prefix included: a prefix is **resolved once at startup** into the exact account it names, so the check itself always compares whole ids and never a prefix against a sender. That is sound because a server refuses to register an account whose id starts like an existing one. Uniqueness is per server, which is why a `*server` part is kept and used for the lookup. An entry that cannot be resolved stops the daemon rather than being skipped — an allow-list that quietly lost one is a bot that silently answers nobody. Whole ids need no lookup, so a bot configured with them starts even while its server is unreachable. |
 | `FREIZONE_BOT_ALLOW_GROUP_COMMANDS` | `false` | Whether commands may be given in a group. Off by default: a command in a group is visible to everyone in it, its answer is too, and the membership drifts. With it off the bot takes instructions only in a one-to-one chat. |
 | `FREIZONE_BOT_JOKES_FILE` | – | One joke per line (`#` comments and blank lines ignored) for the `/joke` action, replacing the small built-in set. |
 | `FREIZONE_BOT_WEBHOOK_ADDR` | – (off) | Where the [HTTP ingress](#the-http-ingress) listens, e.g. `127.0.0.1:9095`. Unset means there is no listener at all. Bind localhost and let a reverse proxy terminate TLS unless you have a reason not to: that keeps "no exposed port" the default and leaves certificate renewal to something that already does it. |
@@ -558,7 +550,12 @@ go vet ./...
 go test ./...
 ```
 
-There is no CI beyond the release image build, so these are run by hand.
+The same steps run in CI on every push
+([`ci.yml`](.github/workflows/ci.yml)), which also checks `gofmt`, `go mod
+tidy -diff` and `go test -race`. That workflow exists because it did not: until
+`v0.2.0` the only workflow published an image on a version tag, so nothing ever
+compiled this repository except a developer machine — and the two were not the
+same build.
 
 `pkg/client` resolves as an ordinary tagged module (`go.mod` names the
 freizone-server release), so a plain `go build` here is the same build CI and
