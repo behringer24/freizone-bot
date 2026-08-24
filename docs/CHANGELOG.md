@@ -12,6 +12,18 @@ Releases are cut as annotated git tags.
 
 ## [Unreleased]
 
+### Changed
+
+* **The README is a reference again, and the walkthrough lives in the guide.** It
+  had become both at once — 578 lines, with the install steps and the
+  container-or-binary decision 230 lines apart. `Getting it running` and
+  `Putting it in a group` are gone, since `docs/SETUP.md` covers them step by
+  step, while the reasoning behind them stayed as a `Groups` section; the
+  `systemd OnFailure=` example moved into the guide, where a link had been
+  pointing at it anyway. Two defects turned up on the way: a `Local development`
+  section that duplicated `Development` two hundred lines further down, and a
+  claim that this repository has no CI, which stopped being true at `v0.2.0`
+
 ### Added
 
 * **A working example of a declared actions file**, `docs/actions.example.json`
